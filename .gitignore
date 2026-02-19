@@ -1,0 +1,11 @@
+node_modules
+.env
+.env.*
+!.env.example
+**/.next
+**/dist
+**/.turbo
+**/coverage
+.DS_Store
+.idea
+*.iml

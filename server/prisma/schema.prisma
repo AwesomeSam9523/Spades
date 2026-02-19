@@ -1,0 +1,96 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoomStatus {
+  LOBBY
+  IN_PROGRESS
+  FINISHED
+}
+
+enum RoundState {
+  IN_PROGRESS
+  CLOSED
+}
+
+enum RoundPhase {
+  CALLING
+  PLAYING
+  ENDED
+}
+
+model User {
+  id              String       @id @default(cuid())
+  googleId        String       @unique
+  email           String       @unique
+  name            String?
+  avatarUrl       String?
+  createdAt       DateTime     @default(now())
+  memberships     RoomMember[]
+  roomsLed        Room[]       @relation("RoomLeader")
+  verifiedEntries RoundEntry[] @relation("VerifiedBy")
+}
+
+model Room {
+  id        String       @id @default(cuid())
+  code      String       @unique
+  name      String
+  leaderId  String
+  leader    User         @relation("RoomLeader", fields: [leaderId], references: [id], onDelete: Restrict)
+  status    RoomStatus   @default(LOBBY)
+  createdAt DateTime     @default(now())
+  members   RoomMember[]
+  rounds    Round[]
+}
+
+model RoomMember {
+  id           String       @id @default(cuid())
+  roomId        String
+  room          Room         @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  totalPoints   Int          @default(0)
+  joinedAt      DateTime     @default(now())
+  roundEntries  RoundEntry[]
+
+  @@unique([roomId, userId])
+}
+
+model Round {
+  id          String       @id @default(cuid())
+  roomId      String
+  room        Room         @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  roundNumber Int
+  state       RoundState   @default(IN_PROGRESS)
+  phase       RoundPhase   @default(CALLING)
+  createdAt   DateTime     @default(now())
+  startedAt   DateTime?
+  endedAt     DateTime?
+  closedAt    DateTime?
+  entries     RoundEntry[]
+
+  @@unique([roomId, roundNumber])
+}
+
+model RoundEntry {
+  id                  String      @id @default(cuid())
+  roundId             String
+  round               Round       @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  memberId            String
+  member              RoomMember  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  calledHands         Int         @default(0)
+  blindCall           Boolean     @default(false)
+  lockedAt            DateTime?
+  reportedWinningHands Int?
+  verifiedWinningHands Int?
+  verifiedById        String?
+  verifiedBy          User?       @relation("VerifiedBy", fields: [verifiedById], references: [id], onDelete: SetNull)
+  pointsAwarded       Int?
+
+  @@unique([roundId, memberId])
+}
