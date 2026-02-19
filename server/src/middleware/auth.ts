@@ -2,19 +2,17 @@ import type { Request, Response, NextFunction } from "express";
 import { verifyAuthToken } from "../utils/authToken.js";
 
 const getTokenFromRequest = (req: Request): string | null => {
+  const authHeader = req.headers.authorization;
+  if (authHeader) {
+    const [scheme, token] = authHeader.split(" ");
+    if (scheme === "Bearer" && token) {
+      return token;
+    }
+  }
+
   const cookieToken = typeof req.cookies?.auth_token === "string" ? req.cookies.auth_token : null;
   if (cookieToken) {
     return cookieToken;
-  }
-
-  const authHeader = req.headers.authorization;
-  if (!authHeader) {
-    return null;
-  }
-
-  const [scheme, token] = authHeader.split(" ");
-  if (scheme === "Bearer" && token) {
-    return token;
   }
 
   return null;

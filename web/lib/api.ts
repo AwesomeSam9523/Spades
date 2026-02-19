@@ -1,14 +1,60 @@
 import type { RoomSnapshot, SessionUser } from "../types/game";
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const AUTH_TOKEN_STORAGE_KEY = "spades_auth_token";
 
 type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
 
+const getStoredAuthToken = (): string | null => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  return window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+};
+
+const setStoredAuthToken = (token: string): void => {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+};
+
+const clearStoredAuthToken = (): void => {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+};
+
+const hydrateAuthTokenFromUrlHash = (): void => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
+  if (!hash) {
+    return;
+  }
+
+  const params = new URLSearchParams(hash);
+  const token = params.get("auth_token");
+  if (!token) {
+    return;
+  }
+
+  setStoredAuthToken(token);
+  window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}`);
+};
+
 const request = async <T>(path: string, method: HttpMethod, body?: unknown): Promise<T> => {
+  hydrateAuthTokenFromUrlHash();
+  const authToken = getStoredAuthToken();
+
   const response = await fetch(`${apiBaseUrl}${path}`, {
     method,
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
     },
     credentials: "include",
     body: body ? JSON.stringify(body) : undefined
@@ -24,6 +70,10 @@ const request = async <T>(path: string, method: HttpMethod, body?: unknown): Pro
       }
     } catch {
       // ignore parsing error and use default message
+    }
+
+    if (response.status === 401) {
+      clearStoredAuthToken();
     }
 
     throw new Error(message);
@@ -115,10 +165,8 @@ export const makeLeader = async (roomId: string, memberId: string): Promise<void
 };
 
 export const logout = async (): Promise<void> => {
-  await fetch(`${apiBaseUrl}/auth/logout`, {
-    method: "POST",
-    credentials: "include"
-  });
+  await request<void>("/auth/logout", "POST");
+  clearStoredAuthToken();
 };
 
 export const getGoogleLoginUrl = (): string => `${apiBaseUrl}/auth/google`;

@@ -305,7 +305,7 @@ app.get(
         );
 
         res.cookie("auth_token", authToken, authCookieOptions);
-        res.redirect(`${env.FRONTEND_ORIGIN}/`);
+        res.redirect(`${env.FRONTEND_ORIGIN}/#auth_token=${encodeURIComponent(authToken)}`);
       }
     )(req, res, next);
   }

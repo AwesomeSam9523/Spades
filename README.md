@@ -151,6 +151,7 @@ Backend: `http://localhost:4000`
 - For Render cross-site setup, use:
 - `COOKIE_SAME_SITE=none`
 - `COOKIE_SECURE=true`
+- OAuth callback also includes JWT in URL hash for browsers that block third-party cookies; frontend uses it as Bearer token.
 - For local HTTP dev, use:
 - `COOKIE_SAME_SITE=lax`
 - `COOKIE_SECURE=false`
