@@ -17,28 +17,29 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(16),
   JWT_TTL_SECONDS: z.coerce.number().int().positive().default(60 * 60 * 24 * 14),
   COOKIE_SECURE: z.enum(["true", "false"]).optional(),
-  COOKIE_SAME_SITE: z.enum(["lax", "strict", "none"]).default("lax"),
+  COOKIE_SAME_SITE: z.enum(["lax", "strict", "none"]).optional(),
   GOOGLE_CLIENT_ID: z.string(),
   GOOGLE_CLIENT_SECRET: z.string(),
   GOOGLE_CALLBACK_URL: z.string().url()
 });
 
 const env = envSchema.parse(process.env);
-const cookieSecure = env.COOKIE_SAME_SITE === "none"
+const cookieSameSite = env.COOKIE_SAME_SITE ?? (process.env.NODE_ENV === "production" ? "none" : "lax");
+const cookieSecure = cookieSameSite === "none"
   ? true
   : env.COOKIE_SECURE
     ? env.COOKIE_SECURE === "true"
     : process.env.NODE_ENV === "production";
 const authCookieOptions = {
   httpOnly: true,
-  sameSite: env.COOKIE_SAME_SITE,
+  sameSite: cookieSameSite,
   secure: cookieSecure,
   maxAge: env.JWT_TTL_SECONDS * 1000,
   path: "/"
 } as const;
 const authCookieClearOptions = {
   httpOnly: true,
-  sameSite: env.COOKIE_SAME_SITE,
+  sameSite: cookieSameSite,
   secure: cookieSecure,
   path: "/"
 } as const;

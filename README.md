@@ -109,8 +109,9 @@ PORT=4000
 FRONTEND_ORIGIN=http://localhost:3000
 JWT_SECRET=replace-with-a-long-random-string-at-least-16-chars
 JWT_TTL_SECONDS=1209600
-COOKIE_SAME_SITE=lax
-COOKIE_SECURE=false
+# Render/frontend hosted on different origin:
+COOKIE_SAME_SITE=none
+COOKIE_SECURE=true
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 GOOGLE_CALLBACK_URL=http://localhost:4000/auth/google/callback
@@ -150,3 +151,6 @@ Backend: `http://localhost:4000`
 - For Render cross-site setup, use:
 - `COOKIE_SAME_SITE=none`
 - `COOKIE_SECURE=true`
+- For local HTTP dev, use:
+- `COOKIE_SAME_SITE=lax`
+- `COOKIE_SECURE=false`
