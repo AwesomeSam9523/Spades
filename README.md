@@ -107,12 +107,14 @@ Create `server/.env`:
 ```env
 PORT=4000
 FRONTEND_ORIGIN=http://localhost:3000
-SESSION_SECRET=replace-with-a-long-random-string
+JWT_SECRET=replace-with-a-long-random-string-at-least-16-chars
+JWT_TTL_SECONDS=1209600
+COOKIE_SAME_SITE=lax
+COOKIE_SECURE=false
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 GOOGLE_CALLBACK_URL=http://localhost:4000/auth/google/callback
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/spades?schema=public
-REDIS_URL=rediss://default:<password>@<your-render-redis-host>:6379
 ```
 
 Create `web/.env` (optional, default is already `http://localhost:4000`):
@@ -144,5 +146,7 @@ Frontend: `http://localhost:3000`
 Backend: `http://localhost:4000`
 
 ## Notes
-- Sessions are stored in Redis using `connect-redis`.
-- `REDIS_URL` is required and should point to your Render managed Redis instance.
+- Auth uses stateless JWT stored in an `httpOnly` cookie (`auth_token`).
+- For Render cross-site setup, use:
+- `COOKIE_SAME_SITE=none`
+- `COOKIE_SECURE=true`

@@ -1,41 +1,47 @@
 import "dotenv/config";
-import RedisStore from "connect-redis";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
-import session from "express-session";
 import {createServer} from "node:http";
 import passport from "passport";
 import {Strategy as GoogleStrategy} from "passport-google-oauth20";
-import {createClient} from "redis";
 import {Server as SocketIOServer} from "socket.io";
 import {z} from "zod";
 import {prisma} from "./utils/prisma.js";
 import {requireAuth} from "./middleware/auth.js";
+import {createAuthToken} from "./utils/authToken.js";
 
 const envSchema = z.object({
   PORT: z.coerce.number().default(4000),
   FRONTEND_ORIGIN: z.string().default("http://localhost:3000"),
-  SESSION_SECRET: z.string().min(8),
-  REDIS_URL: z.string().url(),
+  JWT_SECRET: z.string().min(16),
+  JWT_TTL_SECONDS: z.coerce.number().int().positive().default(60 * 60 * 24 * 14),
+  COOKIE_SECURE: z.enum(["true", "false"]).optional(),
+  COOKIE_SAME_SITE: z.enum(["lax", "strict", "none"]).default("lax"),
   GOOGLE_CLIENT_ID: z.string(),
   GOOGLE_CLIENT_SECRET: z.string(),
   GOOGLE_CALLBACK_URL: z.string().url()
 });
 
 const env = envSchema.parse(process.env);
-const redisClient = createClient({
-  url: env.REDIS_URL
-});
-const redisStore = new RedisStore({
-  client: redisClient,
-  prefix: "spades:sess:"
-});
-
-redisClient.on("error", (error: unknown) => {
-  // eslint-disable-next-line no-console
-  console.error("Redis client error:", error);
-});
+const cookieSecure = env.COOKIE_SAME_SITE === "none"
+  ? true
+  : env.COOKIE_SECURE
+    ? env.COOKIE_SECURE === "true"
+    : process.env.NODE_ENV === "production";
+const authCookieOptions = {
+  httpOnly: true,
+  sameSite: env.COOKIE_SAME_SITE,
+  secure: cookieSecure,
+  maxAge: env.JWT_TTL_SECONDS * 1000,
+  path: "/"
+} as const;
+const authCookieClearOptions = {
+  httpOnly: true,
+  sameSite: env.COOKIE_SAME_SITE,
+  secure: cookieSecure,
+  path: "/"
+} as const;
 
 const app = express();
 const httpServer = createServer(app);
@@ -50,47 +56,8 @@ app.use(cors({origin: env.FRONTEND_ORIGIN, credentials: true}));
 app.use(express.json());
 app.use(cookieParser());
 app.set("trust proxy", 1);
-app.use(
-  session({
-    store: redisStore,
-    secret: env.SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    proxy: true,
-    cookie: {
-      httpOnly: true,
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 1000 * 60 * 60 * 24 * 14
-    }
-  })
-);
 
 app.use(passport.initialize());
-app.use(passport.session());
-
-passport.serializeUser((user, done) => {
-  done(null, user.id);
-});
-
-passport.deserializeUser(async (id: string, done) => {
-  try {
-    const user = await prisma.user.findUnique({where: {id}});
-    if (!user) {
-      done(null, false);
-      return;
-    }
-
-    done(null, {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      avatarUrl: user.avatarUrl
-    });
-  } catch (error) {
-    done(error as Error);
-  }
-});
 
 passport.use(
   new GoogleStrategy(
@@ -311,32 +278,41 @@ app.get("/health", (_req, res) => {
   res.json({status: "ok"});
 });
 
-app.get("/auth/google", passport.authenticate("google", {scope: ["profile", "email"]}));
+app.get("/auth/google", passport.authenticate("google", {scope: ["profile", "email"], session: false}));
 
 app.get(
   "/auth/google/callback",
-  passport.authenticate("google", {failureRedirect: `${env.FRONTEND_ORIGIN}/?login=failed`}),
-  (_req, res) => {
-    res.redirect(`${env.FRONTEND_ORIGIN}/`);
+  (req, res, next) => {
+    passport.authenticate(
+      "google",
+      {failureRedirect: `${env.FRONTEND_ORIGIN}/?login=failed`, session: false},
+      (error: Error | null, user: Express.User | false) => {
+        if (error || !user) {
+          res.redirect(`${env.FRONTEND_ORIGIN}/?login=failed`);
+          return;
+        }
+
+        const authToken = createAuthToken(
+          {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            avatarUrl: user.avatarUrl
+          },
+          env.JWT_SECRET,
+          env.JWT_TTL_SECONDS
+        );
+
+        res.cookie("auth_token", authToken, authCookieOptions);
+        res.redirect(`${env.FRONTEND_ORIGIN}/`);
+      }
+    )(req, res, next);
   }
 );
 
-app.post("/auth/logout", requireAuth, (req, res, next) => {
-  req.logout((error) => {
-    if (error) {
-      next(error);
-      return;
-    }
-
-    req.session.destroy((destroyError) => {
-      if (destroyError) {
-        next(destroyError);
-        return;
-      }
-      res.clearCookie("connect.sid");
-      res.status(204).send();
-    });
-  });
+app.post("/auth/logout", (_req, res) => {
+  res.clearCookie("auth_token", authCookieClearOptions);
+  res.status(204).send();
 });
 
 app.get("/api/auth/me", requireAuth, (req, res) => {
@@ -1052,18 +1028,7 @@ app.use((error: Error, _req: express.Request, res: express.Response, _next: expr
   res.status(500).json({error: "Internal server error"});
 });
 
-const startServer = async () => {
-  try {
-    await redisClient.connect();
-    httpServer.listen(env.PORT, () => {
-      // eslint-disable-next-line no-console
-      console.log(`Server listening on http://localhost:${env.PORT}`);
-    });
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error("Failed to connect to Redis and start server:", error);
-    process.exit(1);
-  }
-};
-
-void startServer();
+httpServer.listen(env.PORT, () => {
+  // eslint-disable-next-line no-console
+  console.log(`Server listening on http://localhost:${env.PORT}`);
+});
