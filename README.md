@@ -1,82 +1,147 @@
-# Spades Tracker (Next.js + Express + Prisma + Postgres)
+# Spades Tracker
 
-TypeScript-only app for offline Spades score tracking with:
-- Google login for persistent user progress
-- Room system using 6-character join codes
-- Room capacity: max 4 players
-- Room leader verification for all hands before round close
-- Locked call rule: initial call must be locked; after lock it can increase but not decrease
-- Set flow: each set is 4 rounds
-- Hands range is restricted to 2-13
-- Blind call available during calling phase (minimum blind call is 5, doubles positive score only)
-- Live leaderboard updates via WebSocket
+TypeScript-only Spades room tracker with live updates, Google login, leader-controlled flow, and mobile-first hand controls.
 
-## Tech stack
+## Stack
 - Frontend: Next.js (App Router), React, Socket.IO client
-- Backend: Express, Passport Google OAuth, Socket.IO server
+- Backend: Express, Passport (Google OAuth), Socket.IO server
 - Database: PostgreSQL + Prisma ORM
 
-## Project layout
-- `/Users/samakshgupta/IdeaProjects/Spades/apps/web` - Next.js UI
-- `/Users/samakshgupta/IdeaProjects/Spades/apps/server` - Express API, auth, and game engine
-- `/Users/samakshgupta/IdeaProjects/Spades/apps/server/prisma/schema.prisma` - DB schema
+## Project Structure
+- `web/` - Next.js frontend
+- `server/` - Express API + Prisma + Socket.IO
+- `server/prisma/schema.prisma` - database schema
 
-## Scoring rule implemented
-- If verified hands >= called hands: `called * 10 + (verified - called)`
-- If verified hands < called hands: `called * -10`
+## Core Game Rules
+- Room capacity is max 4 players.
+- Each set has 4 rounds.
+- Round phases:
+1. `CALLING` - players lock calls, leader can start round
+2. `PLAYING` - game in progress, leader can end round
+3. `ENDED` - players report hands, leader verifies and closes
+- Call/report/verify hand values are restricted to `2..13`.
+- First call must be locked.
+- After locking, calls can increase but not decrease.
+- Reporting is only allowed after leader clicks End Round.
+- Leader must verify all players before closing and scoring.
 
-Example: called 4, made 6 => `4 * 10 + 2 = 42`
-Example: called 4, made 3 => `-40`
+## Blind Call
+- Blind call can be set during `CALLING` before leader clicks Start Round.
+- Blind call must be `>= 5`.
+- Blind entries are marked with `*` in called and reported/verified hand display.
+- Scoring with blind call:
+- Positive score is doubled.
+- Negative score is not doubled.
+
+Examples:
+- Blind call 5, made 5 -> `100`
+- Blind call 5, made 6 -> `102`
+- Blind call 5, made 4 -> `-50`
+
+## Scoring
+- If verified hands >= called hands:
+- `called * 10 + (verified - called)`
+- If verified hands < called hands:
+- `called * -10`
+- If blind call is true and score is positive:
+- score is multiplied by `2`
+
+## Room Management
+- Leader can kick players.
+- Leader can transfer leadership using **Make Leader**.
+- Leader cannot kick self.
+- If a player is kicked, they are redirected to home immediately.
+- Joining a full room returns `Room full (max 4 players)`.
+
+## UI Behavior
+- Mobile-first `+ / -` controls for all hand values.
+- Non-leaders do not see the Action column in Players table.
+- Leader sees Action controls (`Make Leader`, `Kick`).
+- Player names are truncated with `...` where needed.
+- Roles remain visible.
+- Live leaderboard:
+- sorted by points
+- no serial-number column
+- truncated names with fixed points visibility
+- leader marked with a crown icon
+- Google avatar shown in leaderboard and top-right profile chip.
+
+## Live Updates (WebSocket)
+Clients subscribe to room updates and receive:
+- `room:update` - full room snapshot
+- `leaderboard:update` - leaderboard payload
+
+## API Summary
+Auth:
+- `GET /auth/google`
+- `GET /auth/google/callback`
+- `POST /auth/logout`
+- `GET /api/auth/me`
+
+Rooms:
+- `POST /api/rooms`
+- `POST /api/rooms/join`
+- `GET /api/rooms/mine`
+- `GET /api/rooms/:roomId`
+- `DELETE /api/rooms/:roomId/members/:memberId`
+- `PATCH /api/rooms/:roomId/leader/:memberId`
+
+Rounds:
+- `POST /api/rooms/:roomId/rounds`
+- `PATCH /api/rounds/:roundId/call`
+- `POST /api/rounds/:roundId/start`
+- `POST /api/rounds/:roundId/end`
+- `PATCH /api/rounds/:roundId/report`
+- `PATCH /api/rounds/:roundId/verify/:memberId`
+- `POST /api/rounds/:roundId/close`
 
 ## Setup
-1. Install dependencies:
+### 1) Install dependencies
 ```bash
-npm install
+cd server && npm install
+cd ../web && npm install
 ```
 
-2. Start PostgreSQL (Docker):
-```bash
-docker compose up -d
+### 2) Configure environment
+Create `server/.env`:
+```env
+PORT=4000
+FRONTEND_ORIGIN=http://localhost:3000
+SESSION_SECRET=replace-with-a-long-random-string
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+GOOGLE_CALLBACK_URL=http://localhost:4000/auth/google/callback
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/spades?schema=public
 ```
 
-3. Configure env files:
-```bash
-cp apps/server/.env.example apps/server/.env
-cp apps/web/.env apps/web/.env.local
+Create `web/.env` (optional, default is already `http://localhost:4000`):
+```env
+NEXT_PUBLIC_API_URL=http://localhost:4000
 ```
 
-4. Create a Google OAuth app and set callback URL to:
-- `http://localhost:4000/auth/google/callback`
-
-5. Run Prisma migration:
+### 3) Prepare database
+From `server/`:
 ```bash
-npm run prisma:migrate
 npm run prisma:generate
+npm run prisma:migrate
 ```
 
-6. Start both apps:
+### 4) Run apps
+Terminal 1:
 ```bash
+cd server
 npm run dev
 ```
 
-## Core API flow
-- `GET /auth/google` - login with Google
-- `POST /api/rooms` - create room (creator becomes leader)
-- `POST /api/rooms/join` - join room by code
-- `DELETE /api/rooms/:roomId/members/:memberId` - leader kicks a player
-- `POST /api/rooms/:roomId/rounds` - leader starts round
-- `POST /api/rounds/:roundId/start` - leader starts play after everyone locks calls
-- `POST /api/rounds/:roundId/end` - leader ends play; only then reporting is allowed
-- `PATCH /api/rounds/:roundId/call` - player locks or increases call
-- `PATCH /api/rounds/:roundId/report` - player reports winning hands
-- `PATCH /api/rounds/:roundId/verify/:memberId` - leader verifies a player’s hands
-- `POST /api/rounds/:roundId/close` - leader closes round and awards points
+Terminal 2:
+```bash
+cd web
+npm run dev
+```
 
-## Live updates
-Frontend subscribes to room events through Socket.IO and receives:
-- `room:update` (full room snapshot)
-- `leaderboard:update` (leaderboard payload)
+Frontend: `http://localhost:3000`
+Backend: `http://localhost:4000`
 
 ## Notes
-- Session store is in-memory (`express-session` default), suitable for local/offline use.
-- For production, replace it with Redis or another persistent session store.
+- Session store currently uses in-memory `express-session` (good for local/offline play).
+- For production, use a persistent session store (e.g. Redis).
