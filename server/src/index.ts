@@ -1,26 +1,41 @@
 import "dotenv/config";
+import RedisStore from "connect-redis";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
 import session from "express-session";
-import { createServer } from "node:http";
+import {createServer} from "node:http";
 import passport from "passport";
-import { Strategy as GoogleStrategy } from "passport-google-oauth20";
-import { Server as SocketIOServer } from "socket.io";
-import { z } from "zod";
-import { prisma } from "./utils/prisma.js";
-import { requireAuth } from "./middleware/auth.js";
+import {Strategy as GoogleStrategy} from "passport-google-oauth20";
+import {createClient} from "redis";
+import {Server as SocketIOServer} from "socket.io";
+import {z} from "zod";
+import {prisma} from "./utils/prisma.js";
+import {requireAuth} from "./middleware/auth.js";
 
 const envSchema = z.object({
   PORT: z.coerce.number().default(4000),
   FRONTEND_ORIGIN: z.string().default("http://localhost:3000"),
   SESSION_SECRET: z.string().min(8),
+  REDIS_URL: z.string().url(),
   GOOGLE_CLIENT_ID: z.string(),
   GOOGLE_CLIENT_SECRET: z.string(),
   GOOGLE_CALLBACK_URL: z.string().url()
 });
 
 const env = envSchema.parse(process.env);
+const redisClient = createClient({
+  url: env.REDIS_URL
+});
+const redisStore = new RedisStore({
+  client: redisClient,
+  prefix: "spades:sess:"
+});
+
+redisClient.on("error", (error: unknown) => {
+  // eslint-disable-next-line no-console
+  console.error("Redis client error:", error);
+});
 
 const app = express();
 const httpServer = createServer(app);
@@ -31,18 +46,20 @@ const io = new SocketIOServer(httpServer, {
   }
 });
 
-app.use(cors({ origin: env.FRONTEND_ORIGIN, credentials: true }));
+app.use(cors({origin: env.FRONTEND_ORIGIN, credentials: true}));
 app.use(express.json());
 app.use(cookieParser());
+app.set("trust proxy", 1);
 app.use(
   session({
+    store: redisStore,
     secret: env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      sameSite: "lax",
-      secure: false,
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      secure: process.env.NODE_ENV === "production",
       maxAge: 1000 * 60 * 60 * 24 * 14
     }
   })
@@ -57,7 +74,7 @@ passport.serializeUser((user, done) => {
 
 passport.deserializeUser(async (id: string, done) => {
   try {
-    const user = await prisma.user.findUnique({ where: { id } });
+    const user = await prisma.user.findUnique({where: {id}});
     if (!user) {
       done(null, false);
       return;
@@ -90,7 +107,7 @@ passport.use(
         }
 
         const user = await prisma.user.upsert({
-          where: { googleId: profile.id },
+          where: {googleId: profile.id},
           update: {
             email,
             name: profile.displayName,
@@ -135,7 +152,7 @@ const generateRoomCode = (): string => {
 const createUniqueRoomCode = async (): Promise<string> => {
   while (true) {
     const code = generateRoomCode();
-    const existing = await prisma.room.findUnique({ where: { code } });
+    const existing = await prisma.room.findUnique({where: {code}});
     if (!existing) {
       return code;
     }
@@ -167,13 +184,13 @@ const computeRoundPoints = (calledHands: number, verifiedHands: number, blindCal
 
 const getRoomSnapshot = async (roomId: string) => {
   const room = await prisma.room.findUnique({
-    where: { id: roomId },
+    where: {id: roomId},
     include: {
       members: {
         include: {
           user: true
         },
-        orderBy: { joinedAt: "asc" }
+        orderBy: {joinedAt: "asc"}
       },
       rounds: {
         include: {
@@ -185,10 +202,10 @@ const getRoomSnapshot = async (roomId: string) => {
                 }
               }
             },
-            orderBy: { member: { joinedAt: "asc" } }
+            orderBy: {member: {joinedAt: "asc"}}
           }
         },
-        orderBy: { roundNumber: "asc" }
+        orderBy: {roundNumber: "asc"}
       }
     }
   });
@@ -290,14 +307,14 @@ io.on("connection", (socket) => {
 });
 
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok" });
+  res.json({status: "ok"});
 });
 
-app.get("/auth/google", passport.authenticate("google", { scope: ["profile", "email"] }));
+app.get("/auth/google", passport.authenticate("google", {scope: ["profile", "email"]}));
 
 app.get(
   "/auth/google/callback",
-  passport.authenticate("google", { failureRedirect: `${env.FRONTEND_ORIGIN}/?login=failed` }),
+  passport.authenticate("google", {failureRedirect: `${env.FRONTEND_ORIGIN}/?login=failed`}),
   (_req, res) => {
     res.redirect(`${env.FRONTEND_ORIGIN}/`);
   }
@@ -322,7 +339,7 @@ app.post("/auth/logout", requireAuth, (req, res, next) => {
 });
 
 app.get("/api/auth/me", requireAuth, (req, res) => {
-  res.json({ user: req.user! });
+  res.json({user: req.user!});
 });
 
 app.post("/api/rooms", requireAuth, async (req, res, next) => {
@@ -361,25 +378,25 @@ app.post("/api/rooms/join", requireAuth, async (req, res, next) => {
   try {
     const code = typeof req.body?.code === "string" ? req.body.code.trim().toUpperCase() : "";
     if (!code) {
-      res.status(400).json({ error: "Room code is required" });
+      res.status(400).json({error: "Room code is required"});
       return;
     }
 
     const room = await prisma.room.findUnique({
-      where: { code },
+      where: {code},
       include: {
         rounds: {
-          where: { state: "IN_PROGRESS" }
+          where: {state: "IN_PROGRESS"}
         }
       }
     });
     if (!room) {
-      res.status(404).json({ error: "Room not found" });
+      res.status(404).json({error: "Room not found"});
       return;
     }
 
     if (room.rounds.length > 0) {
-      res.status(400).json({ error: "Cannot join while a round is in progress" });
+      res.status(400).json({error: "Cannot join while a round is in progress"});
       return;
     }
 
@@ -394,11 +411,11 @@ app.post("/api/rooms/join", requireAuth, async (req, res, next) => {
 
     if (!existingMembership) {
       const memberCount = await prisma.roomMember.count({
-        where: { roomId: room.id }
+        where: {roomId: room.id}
       });
 
       if (memberCount >= ROOM_MAX_PLAYERS) {
-        res.status(400).json({ error: "Room full (max 4 players)" });
+        res.status(400).json({error: "Room full (max 4 players)"});
         return;
       }
 
@@ -421,7 +438,7 @@ app.post("/api/rooms/join", requireAuth, async (req, res, next) => {
 app.get("/api/rooms/mine", requireAuth, async (req, res, next) => {
   try {
     const memberships = await prisma.roomMember.findMany({
-      where: { userId: req.user!.id },
+      where: {userId: req.user!.id},
       include: {
         room: true
       },
@@ -447,13 +464,13 @@ app.get("/api/rooms/:roomId", requireAuth, async (req, res, next) => {
   try {
     const membership = await requireRoomMembership(req.params.roomId, req.user!.id);
     if (!membership) {
-      res.status(403).json({ error: "You are not a member of this room" });
+      res.status(403).json({error: "You are not a member of this room"});
       return;
     }
 
     const snapshot = await getRoomSnapshot(req.params.roomId);
     if (!snapshot) {
-      res.status(404).json({ error: "Room not found" });
+      res.status(404).json({error: "Room not found"});
       return;
     }
 
@@ -466,35 +483,35 @@ app.get("/api/rooms/:roomId", requireAuth, async (req, res, next) => {
 app.delete("/api/rooms/:roomId/members/:memberId", requireAuth, async (req, res, next) => {
   try {
     const room = await prisma.room.findUnique({
-      where: { id: req.params.roomId }
+      where: {id: req.params.roomId}
     });
 
     if (!room) {
-      res.status(404).json({ error: "Room not found" });
+      res.status(404).json({error: "Room not found"});
       return;
     }
 
     if (room.leaderId !== req.user!.id) {
-      res.status(403).json({ error: "Only the room leader can kick players" });
+      res.status(403).json({error: "Only the room leader can kick players"});
       return;
     }
 
     const targetMember = await prisma.roomMember.findUnique({
-      where: { id: req.params.memberId }
+      where: {id: req.params.memberId}
     });
 
     if (!targetMember || targetMember.roomId !== room.id) {
-      res.status(404).json({ error: "Player not found in this room" });
+      res.status(404).json({error: "Player not found in this room"});
       return;
     }
 
     if (targetMember.userId === room.leaderId) {
-      res.status(400).json({ error: "Room leader cannot be kicked" });
+      res.status(400).json({error: "Room leader cannot be kicked"});
       return;
     }
 
     await prisma.roomMember.delete({
-      where: { id: targetMember.id }
+      where: {id: targetMember.id}
     });
 
     await emitRoomUpdate(room.id);
@@ -507,35 +524,35 @@ app.delete("/api/rooms/:roomId/members/:memberId", requireAuth, async (req, res,
 app.patch("/api/rooms/:roomId/leader/:memberId", requireAuth, async (req, res, next) => {
   try {
     const room = await prisma.room.findUnique({
-      where: { id: req.params.roomId }
+      where: {id: req.params.roomId}
     });
 
     if (!room) {
-      res.status(404).json({ error: "Room not found" });
+      res.status(404).json({error: "Room not found"});
       return;
     }
 
     if (room.leaderId !== req.user!.id) {
-      res.status(403).json({ error: "Only the current leader can transfer leadership" });
+      res.status(403).json({error: "Only the current leader can transfer leadership"});
       return;
     }
 
     const targetMember = await prisma.roomMember.findUnique({
-      where: { id: req.params.memberId }
+      where: {id: req.params.memberId}
     });
 
     if (!targetMember || targetMember.roomId !== room.id) {
-      res.status(404).json({ error: "Player not found in this room" });
+      res.status(404).json({error: "Player not found in this room"});
       return;
     }
 
     if (targetMember.userId === room.leaderId) {
-      res.status(400).json({ error: "Player is already the leader" });
+      res.status(400).json({error: "Player is already the leader"});
       return;
     }
 
     await prisma.room.update({
-      where: { id: room.id },
+      where: {id: room.id},
       data: {
         leaderId: targetMember.userId
       }
@@ -551,33 +568,33 @@ app.patch("/api/rooms/:roomId/leader/:memberId", requireAuth, async (req, res, n
 app.post("/api/rooms/:roomId/rounds", requireAuth, async (req, res, next) => {
   try {
     const room = await prisma.room.findUnique({
-      where: { id: req.params.roomId },
+      where: {id: req.params.roomId},
       include: {
         members: true,
         rounds: {
-          where: { state: "IN_PROGRESS" }
+          where: {state: "IN_PROGRESS"}
         }
       }
     });
 
     if (!room) {
-      res.status(404).json({ error: "Room not found" });
+      res.status(404).json({error: "Room not found"});
       return;
     }
 
     if (room.leaderId !== req.user!.id) {
-      res.status(403).json({ error: "Only the room leader can start rounds" });
+      res.status(403).json({error: "Only the room leader can start rounds"});
       return;
     }
 
     if (room.rounds.length > 0) {
-      res.status(400).json({ error: "Finish the active round first" });
+      res.status(400).json({error: "Finish the active round first"});
       return;
     }
 
     const lastRound = await prisma.round.findFirst({
-      where: { roomId: room.id },
-      orderBy: { roundNumber: "desc" }
+      where: {roomId: room.id},
+      orderBy: {roundNumber: "desc"}
     });
 
     const round = await prisma.$transaction(async (tx) => {
@@ -589,8 +606,8 @@ app.post("/api/rooms/:roomId/rounds", requireAuth, async (req, res, next) => {
       });
 
       await tx.room.update({
-        where: { id: room.id },
-        data: { status: "IN_PROGRESS" }
+        where: {id: room.id},
+        data: {status: "IN_PROGRESS"}
       });
 
       await tx.roundEntry.createMany({
@@ -604,7 +621,7 @@ app.post("/api/rooms/:roomId/rounds", requireAuth, async (req, res, next) => {
     });
 
     await emitRoomUpdate(room.id);
-    res.status(201).json({ roundId: round.id });
+    res.status(201).json({roundId: round.id});
   } catch (error) {
     next(error);
   }
@@ -614,7 +631,7 @@ app.patch("/api/rounds/:roundId/call", requireAuth, async (req, res, next) => {
   try {
     const parsed = roundCallSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ error: "Invalid call payload" });
+      res.status(400).json({error: "Invalid call payload"});
       return;
     }
 
@@ -632,36 +649,36 @@ app.patch("/api/rounds/:roundId/call", requireAuth, async (req, res, next) => {
     });
 
     if (!entry) {
-      res.status(404).json({ error: "Round entry not found" });
+      res.status(404).json({error: "Round entry not found"});
       return;
     }
 
     if (entry.round.state !== "IN_PROGRESS") {
-      res.status(400).json({ error: "Round is already closed" });
+      res.status(400).json({error: "Round is already closed"});
       return;
     }
 
     if (entry.round.phase !== "CALLING") {
-      res.status(400).json({ error: "Calling phase has ended" });
+      res.status(400).json({error: "Calling phase has ended"});
       return;
     }
 
-    const { calledHands, blindCall: requestedBlindCall, lock } = parsed.data;
+    const {calledHands, blindCall: requestedBlindCall, lock} = parsed.data;
     const blindCall = requestedBlindCall ?? entry.blindCall;
 
     if (blindCall && calledHands < BLIND_MIN_HANDS) {
-      res.status(400).json({ error: "Blind call must be at least 5 hands" });
+      res.status(400).json({error: "Blind call must be at least 5 hands"});
       return;
     }
 
     if (!entry.lockedAt) {
       if (!lock) {
-        res.status(400).json({ error: "Initial estimate must be locked" });
+        res.status(400).json({error: "Initial estimate must be locked"});
         return;
       }
 
       await prisma.roundEntry.update({
-        where: { id: entry.id },
+        where: {id: entry.id},
         data: {
           calledHands,
           blindCall,
@@ -670,12 +687,12 @@ app.patch("/api/rounds/:roundId/call", requireAuth, async (req, res, next) => {
       });
     } else {
       if (calledHands < entry.calledHands) {
-        res.status(400).json({ error: "Locked estimate cannot be decreased" });
+        res.status(400).json({error: "Locked estimate cannot be decreased"});
         return;
       }
 
       await prisma.roundEntry.update({
-        where: { id: entry.id },
+        where: {id: entry.id},
         data: {
           calledHands,
           blindCall
@@ -693,7 +710,7 @@ app.patch("/api/rounds/:roundId/call", requireAuth, async (req, res, next) => {
 app.post("/api/rounds/:roundId/start", requireAuth, async (req, res, next) => {
   try {
     const round = await prisma.round.findUnique({
-      where: { id: req.params.roundId },
+      where: {id: req.params.roundId},
       include: {
         room: true,
         entries: true
@@ -701,33 +718,33 @@ app.post("/api/rounds/:roundId/start", requireAuth, async (req, res, next) => {
     });
 
     if (!round) {
-      res.status(404).json({ error: "Round not found" });
+      res.status(404).json({error: "Round not found"});
       return;
     }
 
     if (round.room.leaderId !== req.user!.id) {
-      res.status(403).json({ error: "Only the room leader can start the round" });
+      res.status(403).json({error: "Only the room leader can start the round"});
       return;
     }
 
     if (round.state !== "IN_PROGRESS") {
-      res.status(400).json({ error: "Round is already closed" });
+      res.status(400).json({error: "Round is already closed"});
       return;
     }
 
     if (round.phase !== "CALLING") {
-      res.status(400).json({ error: "Round has already started" });
+      res.status(400).json({error: "Round has already started"});
       return;
     }
 
     const missingCalls = round.entries.find((entry) => !entry.lockedAt);
     if (missingCalls) {
-      res.status(400).json({ error: "All players must lock their calls before starting the round" });
+      res.status(400).json({error: "All players must lock their calls before starting the round"});
       return;
     }
 
     await prisma.round.update({
-      where: { id: round.id },
+      where: {id: round.id},
       data: {
         phase: "PLAYING",
         startedAt: new Date()
@@ -744,34 +761,34 @@ app.post("/api/rounds/:roundId/start", requireAuth, async (req, res, next) => {
 app.post("/api/rounds/:roundId/end", requireAuth, async (req, res, next) => {
   try {
     const round = await prisma.round.findUnique({
-      where: { id: req.params.roundId },
+      where: {id: req.params.roundId},
       include: {
         room: true
       }
     });
 
     if (!round) {
-      res.status(404).json({ error: "Round not found" });
+      res.status(404).json({error: "Round not found"});
       return;
     }
 
     if (round.room.leaderId !== req.user!.id) {
-      res.status(403).json({ error: "Only the room leader can end the round" });
+      res.status(403).json({error: "Only the room leader can end the round"});
       return;
     }
 
     if (round.state !== "IN_PROGRESS") {
-      res.status(400).json({ error: "Round is already closed" });
+      res.status(400).json({error: "Round is already closed"});
       return;
     }
 
     if (round.phase !== "PLAYING") {
-      res.status(400).json({ error: "Round must be in playing phase before ending" });
+      res.status(400).json({error: "Round must be in playing phase before ending"});
       return;
     }
 
     await prisma.round.update({
-      where: { id: round.id },
+      where: {id: round.id},
       data: {
         phase: "ENDED",
         endedAt: new Date()
@@ -789,7 +806,7 @@ app.patch("/api/rounds/:roundId/report", requireAuth, async (req, res, next) => 
   try {
     const parsed = reportSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ error: "Invalid report payload" });
+      res.status(400).json({error: "Invalid report payload"});
       return;
     }
 
@@ -806,22 +823,22 @@ app.patch("/api/rounds/:roundId/report", requireAuth, async (req, res, next) => 
     });
 
     if (!entry) {
-      res.status(404).json({ error: "Round entry not found" });
+      res.status(404).json({error: "Round entry not found"});
       return;
     }
 
     if (entry.round.state !== "IN_PROGRESS") {
-      res.status(400).json({ error: "Round is already closed" });
+      res.status(400).json({error: "Round is already closed"});
       return;
     }
 
     if (entry.round.phase !== "ENDED") {
-      res.status(400).json({ error: "You can report hands only after the leader ends the round" });
+      res.status(400).json({error: "You can report hands only after the leader ends the round"});
       return;
     }
 
     await prisma.roundEntry.update({
-      where: { id: entry.id },
+      where: {id: entry.id},
       data: {
         reportedWinningHands: parsed.data.winningHands
       }
@@ -838,34 +855,34 @@ app.patch("/api/rounds/:roundId/verify/:memberId", requireAuth, async (req, res,
   try {
     const parsed = verifySchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ error: "Invalid verification payload" });
+      res.status(400).json({error: "Invalid verification payload"});
       return;
     }
 
     const round = await prisma.round.findUnique({
-      where: { id: req.params.roundId },
+      where: {id: req.params.roundId},
       include: {
         room: true
       }
     });
 
     if (!round) {
-      res.status(404).json({ error: "Round not found" });
+      res.status(404).json({error: "Round not found"});
       return;
     }
 
     if (round.room.leaderId !== req.user!.id) {
-      res.status(403).json({ error: "Only the room leader can verify hands" });
+      res.status(403).json({error: "Only the room leader can verify hands"});
       return;
     }
 
     if (round.state !== "IN_PROGRESS") {
-      res.status(400).json({ error: "Round is already closed" });
+      res.status(400).json({error: "Round is already closed"});
       return;
     }
 
     if (round.phase !== "ENDED") {
-      res.status(400).json({ error: "Verification is available only after the round is ended" });
+      res.status(400).json({error: "Verification is available only after the round is ended"});
       return;
     }
 
@@ -877,19 +894,19 @@ app.patch("/api/rounds/:roundId/verify/:memberId", requireAuth, async (req, res,
     });
 
     if (!entry) {
-      res.status(404).json({ error: "Round entry not found" });
+      res.status(404).json({error: "Round entry not found"});
       return;
     }
 
     if (entry.reportedWinningHands == null) {
-      res.status(400).json({ error: "Player has not reported winning hands yet" });
+      res.status(400).json({error: "Player has not reported winning hands yet"});
       return;
     }
 
     const verifiedWinningHands = parsed.data.verifiedWinningHands ?? entry.reportedWinningHands;
 
     await prisma.roundEntry.update({
-      where: { id: entry.id },
+      where: {id: entry.id},
       data: {
         verifiedWinningHands,
         verifiedById: req.user!.id
@@ -906,7 +923,7 @@ app.patch("/api/rounds/:roundId/verify/:memberId", requireAuth, async (req, res,
 app.post("/api/rounds/:roundId/close", requireAuth, async (req, res, next) => {
   try {
     const round = await prisma.round.findUnique({
-      where: { id: req.params.roundId },
+      where: {id: req.params.roundId},
       include: {
         room: true,
         entries: {
@@ -918,28 +935,28 @@ app.post("/api/rounds/:roundId/close", requireAuth, async (req, res, next) => {
     });
 
     if (!round) {
-      res.status(404).json({ error: "Round not found" });
+      res.status(404).json({error: "Round not found"});
       return;
     }
 
     if (round.room.leaderId !== req.user!.id) {
-      res.status(403).json({ error: "Only the room leader can close rounds" });
+      res.status(403).json({error: "Only the room leader can close rounds"});
       return;
     }
 
     if (round.state !== "IN_PROGRESS") {
-      res.status(400).json({ error: "Round already closed" });
+      res.status(400).json({error: "Round already closed"});
       return;
     }
 
     if (round.phase !== "ENDED") {
-      res.status(400).json({ error: "Round must be ended before closing and scoring" });
+      res.status(400).json({error: "Round must be ended before closing and scoring"});
       return;
     }
 
     const unverified = round.entries.find((entry) => entry.verifiedWinningHands == null);
     if (unverified) {
-      res.status(400).json({ error: "All hands must be verified before closing the round" });
+      res.status(400).json({error: "All hands must be verified before closing the round"});
       return;
     }
 
@@ -949,12 +966,12 @@ app.post("/api/rounds/:roundId/close", requireAuth, async (req, res, next) => {
           const points = computeRoundPoints(entry.calledHands, entry.verifiedWinningHands ?? 0, entry.blindCall);
 
           await tx.roundEntry.update({
-            where: { id: entry.id },
-            data: { pointsAwarded: points }
+            where: {id: entry.id},
+            data: {pointsAwarded: points}
           });
 
           await tx.roomMember.update({
-            where: { id: entry.memberId },
+            where: {id: entry.memberId},
             data: {
               totalPoints: {
                 increment: points
@@ -970,7 +987,7 @@ app.post("/api/rounds/:roundId/close", requireAuth, async (req, res, next) => {
       );
 
       await tx.round.update({
-        where: { id: round.id },
+        where: {id: round.id},
         data: {
           state: "CLOSED",
           closedAt: new Date()
@@ -978,7 +995,7 @@ app.post("/api/rounds/:roundId/close", requireAuth, async (req, res, next) => {
       });
 
       await tx.room.update({
-        where: { id: round.roomId },
+        where: {id: round.roomId},
         data: {
           status: "LOBBY"
         }
@@ -1001,17 +1018,17 @@ app.get("/api/rooms/:roomId/leaderboard", requireAuth, async (req, res, next) =>
   try {
     const membership = await requireRoomMembership(req.params.roomId, req.user!.id);
     if (!membership) {
-      res.status(403).json({ error: "You are not a member of this room" });
+      res.status(403).json({error: "You are not a member of this room"});
       return;
     }
 
     const members = await prisma.roomMember.findMany({
-      where: { roomId: req.params.roomId },
+      where: {roomId: req.params.roomId},
       include: {
         user: true,
         room: true
       },
-      orderBy: [{ totalPoints: "desc" }, { joinedAt: "asc" }]
+      orderBy: [{totalPoints: "desc"}, {joinedAt: "asc"}]
     });
 
     res.json({
@@ -1031,10 +1048,21 @@ app.get("/api/rooms/:roomId/leaderboard", requireAuth, async (req, res, next) =>
 app.use((error: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   // eslint-disable-next-line no-console
   console.error(error);
-  res.status(500).json({ error: "Internal server error" });
+  res.status(500).json({error: "Internal server error"});
 });
 
-httpServer.listen(env.PORT, () => {
-  // eslint-disable-next-line no-console
-  console.log(`Server listening on http://localhost:${env.PORT}`);
-});
+const startServer = async () => {
+  try {
+    await redisClient.connect();
+    httpServer.listen(env.PORT, () => {
+      // eslint-disable-next-line no-console
+      console.log(`Server listening on http://localhost:${env.PORT}`);
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("Failed to connect to Redis and start server:", error);
+    process.exit(1);
+  }
+};
+
+void startServer();

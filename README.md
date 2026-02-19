@@ -112,6 +112,7 @@ GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 GOOGLE_CALLBACK_URL=http://localhost:4000/auth/google/callback
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/spades?schema=public
+REDIS_URL=rediss://default:<password>@<your-render-redis-host>:6379
 ```
 
 Create `web/.env` (optional, default is already `http://localhost:4000`):
@@ -143,5 +144,5 @@ Frontend: `http://localhost:3000`
 Backend: `http://localhost:4000`
 
 ## Notes
-- Session store currently uses in-memory `express-session` (good for local/offline play).
-- For production, use a persistent session store (e.g. Redis).
+- Sessions are stored in Redis using `connect-redis`.
+- `REDIS_URL` is required and should point to your Render managed Redis instance.
