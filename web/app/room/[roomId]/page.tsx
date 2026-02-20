@@ -26,7 +26,8 @@ const getActiveRound = (rounds: Round[]): Round | undefined => {
 };
 
 const ROOM_MAX_PLAYERS = 4;
-const MIN_HANDS = 2;
+const MIN_CALL_HANDS = 2;
+const MIN_RESULT_HANDS = 0;
 const MAX_HANDS = 13;
 const BLIND_MIN_HANDS = 5;
 
@@ -46,7 +47,7 @@ type StepperProps = {
   disabled?: boolean;
 };
 
-function Stepper({ value, onChange, min = MIN_HANDS, max = MAX_HANDS, disabled = false }: StepperProps) {
+function Stepper({ value, onChange, min = MIN_RESULT_HANDS, max = MAX_HANDS, disabled = false }: StepperProps) {
   return (
     <div className="row">
       <button
@@ -96,9 +97,9 @@ export default function RoomPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [callValue, setCallValue] = useState<number>(MIN_HANDS);
+  const [callValue, setCallValue] = useState<number>(MIN_CALL_HANDS);
   const [blindCall, setBlindCall] = useState(false);
-  const [reportValue, setReportValue] = useState<number>(MIN_HANDS);
+  const [reportValue, setReportValue] = useState<number>(MIN_RESULT_HANDS);
   const [verifyValues, setVerifyValues] = useState<Record<string, number>>({});
 
   useEffect(() => {
@@ -184,9 +185,9 @@ export default function RoomPage() {
       return;
     }
 
-    setCallValue(Math.max(myEntry.calledHands, MIN_HANDS));
+    setCallValue(Math.max(myEntry.calledHands, MIN_CALL_HANDS));
     setBlindCall(myEntry.blindCall);
-    setReportValue(myEntry.reportedWinningHands ?? MIN_HANDS);
+    setReportValue(myEntry.reportedWinningHands ?? MIN_RESULT_HANDS);
   }, [myEntry?.entryId, myEntry?.calledHands, myEntry?.blindCall, myEntry?.reportedWinningHands]);
 
   useEffect(() => {
@@ -196,7 +197,7 @@ export default function RoomPage() {
 
     const nextValues: Record<string, number> = {};
     for (const entry of activeRound.entries) {
-      nextValues[entry.memberId] = entry.verifiedWinningHands ?? entry.reportedWinningHands ?? MIN_HANDS;
+      nextValues[entry.memberId] = entry.verifiedWinningHands ?? entry.reportedWinningHands ?? MIN_RESULT_HANDS;
     }
     setVerifyValues(nextValues);
   }, [activeRound]);
@@ -381,13 +382,13 @@ export default function RoomPage() {
           <div style={{ marginTop: 12 }}>
             <h3>Your Call</h3>
             <p className="muted">Call range is 2-13. Blind call requires at least 5 and gives 2x positive points.</p>
-            <Stepper
-              value={callValue}
-              min={myEntry.locked ? Math.max(myEntry.calledHands, MIN_HANDS) : MIN_HANDS}
-              max={MAX_HANDS}
-              disabled={busy}
-              onChange={setCallValue}
-            />
+              <Stepper
+                value={callValue}
+                min={myEntry.locked ? Math.max(myEntry.calledHands, MIN_CALL_HANDS) : MIN_CALL_HANDS}
+                max={MAX_HANDS}
+                disabled={busy}
+                onChange={setCallValue}
+              />
             <div className="row" style={{ marginTop: 8 }}>
               <button
                 type="button"
@@ -441,8 +442,8 @@ export default function RoomPage() {
         {activeRound && myEntry && activeRound.phase === "ENDED" ? (
           <div style={{ marginTop: 12 }}>
             <h3>Report Winning Hands</h3>
-            <p className="muted">Report range is 2-13.</p>
-            <Stepper value={reportValue} min={MIN_HANDS} max={MAX_HANDS} disabled={busy} onChange={setReportValue} />
+            <p className="muted">Report range is 0-13.</p>
+            <Stepper value={reportValue} min={MIN_RESULT_HANDS} max={MAX_HANDS} disabled={busy} onChange={setReportValue} />
             <div style={{ marginTop: 8 }}>
               <button disabled={busy} type="button" onClick={() => runAction(() => reportWinningHands(activeRound.id, reportValue))}>
                 Submit Report
@@ -494,8 +495,8 @@ export default function RoomPage() {
                       {isLeader && activeRound.phase === "ENDED" ? (
                         <div className="row">
                           <Stepper
-                            value={verifyValues[entry.memberId] ?? MIN_HANDS}
-                            min={MIN_HANDS}
+                            value={verifyValues[entry.memberId] ?? MIN_RESULT_HANDS}
+                            min={MIN_RESULT_HANDS}
                             max={MAX_HANDS}
                             disabled={busy}
                             onChange={(nextValue) =>
@@ -510,7 +511,7 @@ export default function RoomPage() {
                             type="button"
                             onClick={() =>
                               runAction(() =>
-                                verifyWinningHands(activeRound.id, entry.memberId, verifyValues[entry.memberId] ?? MIN_HANDS)
+                                verifyWinningHands(activeRound.id, entry.memberId, verifyValues[entry.memberId] ?? MIN_RESULT_HANDS)
                               )
                             }
                           >

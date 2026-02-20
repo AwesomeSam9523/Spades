@@ -105,7 +105,8 @@ passport.use(
 
 const roomCodeChars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const ROOM_MAX_PLAYERS = 4;
-const MIN_HANDS = 2;
+const MIN_CALL_HANDS = 2;
+const MIN_RESULT_HANDS = 0;
 const MAX_HANDS = 13;
 const BLIND_MIN_HANDS = 5;
 
@@ -129,17 +130,17 @@ const createUniqueRoomCode = async (): Promise<string> => {
 };
 
 const roundCallSchema = z.object({
-  calledHands: z.number().int().min(MIN_HANDS).max(MAX_HANDS),
+  calledHands: z.number().int().min(MIN_CALL_HANDS).max(MAX_HANDS),
   blindCall: z.boolean().optional(),
   lock: z.boolean().optional().default(false)
 });
 
 const reportSchema = z.object({
-  winningHands: z.number().int().min(MIN_HANDS).max(MAX_HANDS)
+  winningHands: z.number().int().min(MIN_RESULT_HANDS).max(MAX_HANDS)
 });
 
 const verifySchema = z.object({
-  verifiedWinningHands: z.number().int().min(MIN_HANDS).max(MAX_HANDS).optional()
+  verifiedWinningHands: z.number().int().min(MIN_RESULT_HANDS).max(MAX_HANDS).optional()
 });
 
 const computeRoundPoints = (calledHands: number, verifiedHands: number, blindCall: boolean): number => {

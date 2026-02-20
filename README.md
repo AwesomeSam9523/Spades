@@ -19,7 +19,8 @@ TypeScript-only Spades room tracker with live updates, Google login, leader-cont
 1. `CALLING` - players lock calls, leader can start round
 2. `PLAYING` - game in progress, leader can end round
 3. `ENDED` - players report hands, leader verifies and closes
-- Call/report/verify hand values are restricted to `2..13`.
+- Call hand values are restricted to `2..13`.
+- Reported and leader-verified hand values are restricted to `0..13`.
 - First call must be locked.
 - After locking, calls can increase but not decrease.
 - Reporting is only allowed after leader clicks End Round.
