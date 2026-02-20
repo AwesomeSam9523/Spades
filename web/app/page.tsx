@@ -113,7 +113,6 @@ export default function HomePage() {
       <div className="spread">
         <div>
           <h1>Spades Room Tracker</h1>
-          <p className="muted">Logged in as {user.name ?? user.email}</p>
         </div>
         <div className="top-actions">
           <div className="user-chip">
