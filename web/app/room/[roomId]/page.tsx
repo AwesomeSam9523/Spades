@@ -85,6 +85,13 @@ const formatHands = (value: number | null, blindCall: boolean) => {
   return `${blindCall ? "*" : ""}${value}`;
 };
 
+const formatDiff = (value: number) => {
+  if (value > 0) {
+    return `+${value}`;
+  }
+  return `${value}`;
+};
+
 export default function RoomPage() {
   const params = useParams<{ roomId: string }>();
   const router = useRouter();
@@ -180,6 +187,17 @@ export default function RoomPage() {
     return activeRound.entries.every((entry) => entry.reportedWinningHands != null);
   }, [activeRound]);
 
+  const everyoneVerified = useMemo(() => {
+    if (!activeRound) {
+      return false;
+    }
+    const reportableEntries = activeRound.entries.filter((entry) => entry.reportedWinningHands != null);
+    if (reportableEntries.length === 0) {
+      return false;
+    }
+    return reportableEntries.every((entry) => entry.verifiedWinningHands != null);
+  }, [activeRound]);
+
   useEffect(() => {
     if (!myEntry) {
       return;
@@ -244,6 +262,20 @@ export default function RoomPage() {
   const nextRoundMeta = getSetRoundMeta(lastRoundNumber + 1);
   const activeRoundMeta = activeRound ? getSetRoundMeta(activeRound.roundNumber) : null;
   const isRoomFull = snapshot.members.length >= ROOM_MAX_PLAYERS;
+  const myLeaderboardPoints = snapshot.leaderboard.find((member) => member.userId === user.id)?.totalPoints ?? 0;
+  const verifyAllLabel = everyoneVerified ? "All Verified" : "Verify All";
+
+  const verifyAll = async () => {
+    if (!activeRound) {
+      return;
+    }
+
+    const reportableEntries = activeRound.entries.filter((entry) => entry.reportedWinningHands != null);
+    for (const entry of reportableEntries) {
+      const winningHands = verifyValues[entry.memberId] ?? entry.reportedWinningHands ?? MIN_RESULT_HANDS;
+      await verifyWinningHands(activeRound.id, entry.memberId, winningHands);
+    }
+  };
 
   return (
     <main>
@@ -461,9 +493,19 @@ export default function RoomPage() {
           <div className="spread">
             <h2>Leader Verification</h2>
             {isLeader && activeRound.phase === "ENDED" ? (
-              <button disabled={busy || !everyoneReported} type="button" onClick={() => runAction(() => closeRound(activeRound.id))}>
-                Close Round and Score
-              </button>
+              <div className="row">
+                <button
+                  className={everyoneVerified ? "success" : "secondary"}
+                  disabled={busy || !everyoneReported}
+                  type="button"
+                  onClick={() => runAction(verifyAll)}
+                >
+                  {verifyAllLabel}
+                </button>
+                <button disabled={busy || !everyoneReported} type="button" onClick={() => runAction(() => closeRound(activeRound.id))}>
+                  Close Round and Score
+                </button>
+              </div>
             ) : null}
           </div>
 
@@ -507,6 +549,7 @@ export default function RoomPage() {
                             }
                           />
                           <button
+                            className={entry.verifiedWinningHands != null ? "success" : "secondary"}
                             disabled={busy || entry.reportedWinningHands == null}
                             type="button"
                             onClick={() =>
@@ -515,7 +558,7 @@ export default function RoomPage() {
                               )
                             }
                           >
-                            Verify
+                            {entry.verifiedWinningHands != null ? "Verified" : "Verify"}
                           </button>
                         </div>
                       ) : (
@@ -536,23 +579,30 @@ export default function RoomPage() {
           <thead>
             <tr>
               <th>Player</th>
+              <th>Diff vs You</th>
               <th>Points</th>
             </tr>
           </thead>
           <tbody>
-            {snapshot.leaderboard.map((member) => (
-              <tr key={member.memberId}>
-                <td>
-                  <div className="player-cell">
-                    <Avatar name={member.displayName} src={member.avatarUrl} small />
-                    <span className="player-name" title={member.displayName}>
-                      {member.displayName}
-                    </span>
-                  </div>
-                </td>
-                <td>{member.totalPoints}</td>
-              </tr>
-            ))}
+            {snapshot.leaderboard.map((member) => {
+              const diff = member.totalPoints - myLeaderboardPoints;
+              const diffClass = diff > 0 ? "diff-positive" : diff < 0 ? "diff-negative" : "diff-neutral";
+
+              return (
+                <tr key={member.memberId}>
+                  <td>
+                    <div className="player-cell">
+                      <Avatar name={member.displayName} src={member.avatarUrl} small />
+                      <span className="player-name" title={member.displayName}>
+                        {member.displayName}
+                      </span>
+                    </div>
+                  </td>
+                  <td className={diffClass}>{formatDiff(diff)}</td>
+                  <td>{member.totalPoints}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </section>

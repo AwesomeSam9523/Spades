@@ -87,6 +87,10 @@ button.danger {
   background: var(--warn);
 }
 
+button.success {
+  background: var(--ok);
+}
+
 input {
   width: 100%;
   border: 1px solid var(--line);
@@ -206,11 +210,32 @@ input {
   table-layout: fixed;
 }
 
+.leaderboard-table th:nth-child(2),
+.leaderboard-table td:nth-child(2) {
+  width: 104px;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .leaderboard-table th:last-child,
 .leaderboard-table td:last-child {
   width: 88px;
   text-align: right;
   white-space: nowrap;
+}
+
+.diff-positive {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.diff-negative {
+  color: var(--warn);
+  font-weight: 700;
+}
+
+.diff-neutral {
+  color: var(--muted);
 }
 
 .muted {
@@ -291,6 +316,11 @@ td {
     width: 84px;
   }
 
+  .leaderboard-table th:nth-child(2),
+  .leaderboard-table td:nth-child(2) {
+    width: 96px;
+  }
+
   .table-name-truncate {
     max-width: 180px;
   }
@@ -339,6 +369,11 @@ td {
   .leaderboard-table th:last-child,
   .leaderboard-table td:last-child {
     width: 76px;
+  }
+
+  .leaderboard-table th:nth-child(2),
+  .leaderboard-table td:nth-child(2) {
+    width: 88px;
   }
 
   .table-name-truncate {
