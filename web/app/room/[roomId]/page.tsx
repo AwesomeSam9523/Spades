@@ -198,6 +198,24 @@ export default function RoomPage() {
     return reportableEntries.every((entry) => entry.verifiedWinningHands != null);
   }, [activeRound]);
 
+  const reportedHandsTotal = useMemo(() => {
+    if (!activeRound) {
+      return null;
+    }
+
+    const reportedHands = activeRound.entries
+      .map((entry) => entry.reportedWinningHands)
+      .filter((value): value is number => value != null);
+
+    if (reportedHands.length !== activeRound.entries.length) {
+      return null;
+    }
+
+    return reportedHands.reduce((sum, value) => sum + value, 0);
+  }, [activeRound]);
+
+  const reportedSumIsThirteen = reportedHandsTotal === 13;
+
   useEffect(() => {
     if (!myEntry) {
       return;
@@ -482,7 +500,10 @@ export default function RoomPage() {
               </button>
             </div>
             <p className="muted" style={{ marginTop: 6 }}>
-              Your reported hands: {formatHands(myEntry.reportedWinningHands, myEntry.blindCall)}
+              Your reported hands:{" "}
+              <span className={reportedSumIsThirteen ? "sum-thirteen" : undefined}>
+                {formatHands(myEntry.reportedWinningHands, myEntry.blindCall)}
+              </span>
             </p>
           </div>
         ) : null}
@@ -528,7 +549,7 @@ export default function RoomPage() {
                   <tr key={entry.entryId}>
                     <td>{entry.displayName}</td>
                     <td>{formatHands(entry.calledHands, entry.blindCall)}</td>
-                    <td>
+                    <td className={reportedSumIsThirteen ? "sum-thirteen" : undefined}>
                       {isLeader && activeRound.phase === "ENDED" && entry.verifiedWinningHands != null
                         ? formatHands(entry.verifiedWinningHands, entry.blindCall)
                         : formatHands(entry.reportedWinningHands, entry.blindCall)}

@@ -238,6 +238,11 @@ input {
   color: var(--muted);
 }
 
+.sum-thirteen {
+  color: var(--ok);
+  font-weight: 700;
+}
+
 .muted {
   color: var(--muted);
 }
