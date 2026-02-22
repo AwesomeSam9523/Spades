@@ -54,6 +54,14 @@ Examples:
 - If a player is kicked, they are redirected to home immediately.
 - Joining a full room returns `Room full (max 4 players)`.
 
+## Friends System
+- Send friend request by email.
+- Incoming friend requests can be accepted or declined.
+- Outgoing requests are shown as pending.
+- Friends list shows online/offline status live.
+- You can directly join a friend's latest room from the friends section.
+- Direct join uses normal room rules (cannot join during active round, max 4 players).
+
 ## UI Behavior
 - Mobile-first `+ / -` controls for all hand values.
 - Non-leaders do not see the Action column in Players table.
@@ -71,6 +79,7 @@ Examples:
 Clients subscribe to room updates and receive:
 - `room:update` - full room snapshot
 - `leaderboard:update` - leaderboard payload
+- `friends:update` - refresh friends list/status/requests
 
 ## API Summary
 Auth:
@@ -86,6 +95,12 @@ Rooms:
 - `GET /api/rooms/:roomId`
 - `DELETE /api/rooms/:roomId/members/:memberId`
 - `PATCH /api/rooms/:roomId/leader/:memberId`
+
+Friends:
+- `GET /api/friends`
+- `POST /api/friends/requests`
+- `PATCH /api/friends/requests/:requestId`
+- `POST /api/friends/:friendUserId/join`
 
 Rounds:
 - `POST /api/rooms/:roomId/rounds`

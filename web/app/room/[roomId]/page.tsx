@@ -7,6 +7,7 @@ import { io, type Socket } from "socket.io-client";
 import {
   closeRound,
   endActiveRound,
+  getAuthToken,
   getRoom,
   getSessionUser,
   getSocketUrl,
@@ -130,9 +131,11 @@ export default function RoomPage() {
   }, [user?.id]);
 
   useEffect(() => {
+    const token = getAuthToken();
     const socket = io(getSocketUrl(), {
       withCredentials: true,
-      transports: ["websocket"]
+      transports: ["websocket"],
+      auth: token ? {token} : undefined
     });
 
     socket.on("connect", () => {

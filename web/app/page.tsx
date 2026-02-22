@@ -2,14 +2,34 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createRoom, getGoogleLoginUrl, getMyRooms, getSessionUser, joinRoomByCode, logout } from "../lib/api";
-import type { SessionUser } from "../types/game";
+import { io } from "socket.io-client";
+import {
+  createRoom,
+  getAuthToken,
+  getFriends,
+  getGoogleLoginUrl,
+  getMyRooms,
+  getSessionUser,
+  getSocketUrl,
+  joinFriendRoom,
+  joinRoomByCode,
+  logout,
+  respondToFriendRequest,
+  sendFriendRequest
+} from "../lib/api";
+import type { FriendsSnapshot, SessionUser } from "../types/game";
 
 type MyRoom = {
   roomId: string;
   roomName: string;
   roomCode: string;
   joinedAt: string;
+};
+
+const emptyFriendsSnapshot: FriendsSnapshot = {
+  friends: [],
+  incomingRequests: [],
+  outgoingRequests: []
 };
 
 function Avatar({ name, src }: { name: string; src: string | null }) {
@@ -20,6 +40,14 @@ function Avatar({ name, src }: { name: string; src: string | null }) {
   return <span className="avatar avatar-fallback">{name.slice(0, 1).toUpperCase()}</span>;
 }
 
+function OnlineStatus({ online }: { online: boolean }) {
+  return (
+    <span className={online ? "status ok" : "status"}>
+      {online ? "Online" : "Offline"}
+    </span>
+  );
+}
+
 export default function HomePage() {
   const router = useRouter();
   const [user, setUser] = useState<SessionUser | null>(null);
@@ -28,7 +56,9 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [roomName, setRoomName] = useState("Weekend Spades");
   const [joinCode, setJoinCode] = useState("");
+  const [friendEmail, setFriendEmail] = useState("");
   const [rooms, setRooms] = useState<MyRoom[]>([]);
+  const [friendsSnapshot, setFriendsSnapshot] = useState<FriendsSnapshot>(emptyFriendsSnapshot);
 
   const loginUrl = useMemo(() => getGoogleLoginUrl(), []);
 
@@ -37,8 +67,9 @@ export default function HomePage() {
       try {
         const sessionUser = await getSessionUser();
         setUser(sessionUser);
-        const myRooms = await getMyRooms();
+        const [myRooms, myFriends] = await Promise.all([getMyRooms(), getFriends()]);
         setRooms(myRooms);
+        setFriendsSnapshot(myFriends);
       } catch {
         setUser(null);
       } finally {
@@ -48,6 +79,32 @@ export default function HomePage() {
 
     void initialize();
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    const token = getAuthToken();
+    const socket = io(getSocketUrl(), {
+      withCredentials: true,
+      transports: ["websocket"],
+      auth: token ? { token } : undefined
+    });
+
+    socket.on("friends:update", async () => {
+      try {
+        const latestSnapshot = await getFriends();
+        setFriendsSnapshot(latestSnapshot);
+      } catch {
+        // ignore transient network or auth errors in passive refresh
+      }
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [user?.id]);
 
   const handleCreateRoom = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -79,10 +136,58 @@ export default function HomePage() {
     }
   };
 
+  const handleSendFriendRequest = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setLoadingAction(true);
+    setError(null);
+
+    try {
+      await sendFriendRequest(friendEmail.trim().toLowerCase());
+      setFriendEmail("");
+      const latestSnapshot = await getFriends();
+      setFriendsSnapshot(latestSnapshot);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to send friend request");
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
+  const handleFriendRequestAction = async (requestId: string, action: "accept" | "decline") => {
+    setLoadingAction(true);
+    setError(null);
+
+    try {
+      await respondToFriendRequest(requestId, action);
+      const [myFriends, myRooms] = await Promise.all([getFriends(), getMyRooms()]);
+      setFriendsSnapshot(myFriends);
+      setRooms(myRooms);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to update friend request");
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
+  const handleJoinFriendRoom = async (friendUserId: string) => {
+    setLoadingAction(true);
+    setError(null);
+
+    try {
+      const snapshot = await joinFriendRoom(friendUserId);
+      router.push(`/room/${snapshot.room.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to join your friend's room");
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
   const handleLogout = async () => {
     await logout();
     setUser(null);
     setRooms([]);
+    setFriendsSnapshot(emptyFriendsSnapshot);
   };
 
   if (authLoading) {
@@ -204,6 +309,144 @@ export default function HomePage() {
             </table>
           </div>
         )}
+      </section>
+
+      <section className="card">
+        <h2>Friends</h2>
+        <div className="grid grid-2" style={{ marginTop: 12 }}>
+          <form onSubmit={handleSendFriendRequest}>
+            <h3>Add Friend</h3>
+            <label htmlFor="friend-email">Friend email</label>
+            <input
+              id="friend-email"
+              value={friendEmail}
+              onChange={(event) => setFriendEmail(event.target.value)}
+              placeholder="friend@gmail.com"
+              type="email"
+              required
+            />
+            <div style={{ marginTop: 10 }}>
+              <button disabled={loadingAction} type="submit">
+                Send Request
+              </button>
+            </div>
+          </form>
+
+          <div>
+            <h3>Incoming Requests</h3>
+            {friendsSnapshot.incomingRequests.length === 0 ? (
+              <p className="muted">No incoming requests.</p>
+            ) : (
+              <div className="stack">
+                {friendsSnapshot.incomingRequests.map((request) => (
+                  <div key={request.requestId} className="friend-request-row">
+                    <div className="player-cell">
+                      <Avatar name={request.from.displayName} src={request.from.avatarUrl} />
+                      <div>
+                        <div>{request.from.displayName}</div>
+                        <div className="muted">{request.from.email}</div>
+                      </div>
+                    </div>
+                    <div className="row">
+                      <button disabled={loadingAction} type="button" onClick={() => handleFriendRequestAction(request.requestId, "accept")}>
+                        Accept
+                      </button>
+                      <button
+                        disabled={loadingAction}
+                        type="button"
+                        className="secondary"
+                        onClick={() => handleFriendRequestAction(request.requestId, "decline")}
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <h3>Outgoing Requests</h3>
+          {friendsSnapshot.outgoingRequests.length === 0 ? (
+            <p className="muted">No outgoing requests.</p>
+          ) : (
+            <div className="stack">
+              {friendsSnapshot.outgoingRequests.map((request) => (
+                <div key={request.requestId} className="friend-request-row">
+                  <div className="player-cell">
+                    <Avatar name={request.to.displayName} src={request.to.avatarUrl} />
+                    <div>
+                      <div>{request.to.displayName}</div>
+                      <div className="muted">{request.to.email}</div>
+                    </div>
+                  </div>
+                  <span className="status">Pending</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <h3>Friends List</h3>
+          {friendsSnapshot.friends.length === 0 ? (
+            <p className="muted">No friends yet.</p>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Friend</th>
+                    <th>Status</th>
+                    <th>Room</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {friendsSnapshot.friends.map((friend) => (
+                    <tr key={friend.userId}>
+                      <td>
+                        <div className="player-cell">
+                          <Avatar name={friend.displayName} src={friend.avatarUrl} />
+                          <span className="table-name-truncate" title={friend.displayName}>
+                            {friend.displayName}
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        <OnlineStatus online={friend.isOnline} />
+                      </td>
+                      <td>
+                        {friend.room ? (
+                          <div>
+                            <div className="table-name-truncate" title={friend.room.roomName}>
+                              {friend.room.roomName}
+                            </div>
+                            <span className="code">{friend.room.roomCode}</span>
+                            {friend.room.hasActiveRound ? <div className="muted">Round in progress</div> : null}
+                          </div>
+                        ) : (
+                          <span className="muted">No room</span>
+                        )}
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          disabled={loadingAction || !friend.room || !friend.room.canJoin}
+                          onClick={() => handleJoinFriendRoom(friend.userId)}
+                        >
+                          Join Room
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </section>
     </main>
   );

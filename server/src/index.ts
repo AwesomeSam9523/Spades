@@ -5,11 +5,11 @@ import express from "express";
 import {createServer} from "node:http";
 import passport from "passport";
 import {Strategy as GoogleStrategy} from "passport-google-oauth20";
-import {Server as SocketIOServer} from "socket.io";
+import {Server as SocketIOServer, type Socket} from "socket.io";
 import {z} from "zod";
 import {prisma} from "./utils/prisma.js";
 import {requireAuth} from "./middleware/auth.js";
-import {createAuthToken} from "./utils/authToken.js";
+import {createAuthToken, verifyAuthToken} from "./utils/authToken.js";
 
 const envSchema = z.object({
   PORT: z.coerce.number().default(4000),
@@ -143,6 +143,14 @@ const verifySchema = z.object({
   verifiedWinningHands: z.number().int().min(MIN_RESULT_HANDS).max(MAX_HANDS).optional()
 });
 
+const sendFriendRequestSchema = z.object({
+  email: z.string().trim().toLowerCase().email()
+});
+
+const respondFriendRequestSchema = z.object({
+  action: z.enum(["accept", "decline"])
+});
+
 const computeRoundPoints = (calledHands: number, verifiedHands: number, blindCall: boolean): number => {
   if (verifiedHands < calledHands) {
     return calledHands * -10;
@@ -150,6 +158,30 @@ const computeRoundPoints = (calledHands: number, verifiedHands: number, blindCal
 
   const basePoints = calledHands * 10 + (verifiedHands - calledHands);
   return blindCall ? basePoints * 2 : basePoints;
+};
+
+const makeFriendPairKey = (userIdA: string, userIdB: string): string => {
+  return userIdA < userIdB ? `${userIdA}:${userIdB}` : `${userIdB}:${userIdA}`;
+};
+
+const onlineUserSocketCounts = new Map<string, number>();
+const socketToUserId = new Map<string, string>();
+
+const getUserRoomChannel = (userId: string): string => `user:${userId}`;
+
+const isUserOnline = (userId: string): boolean => (onlineUserSocketCounts.get(userId) ?? 0) > 0;
+
+const incrementUserSockets = (userId: string): void => {
+  onlineUserSocketCounts.set(userId, (onlineUserSocketCounts.get(userId) ?? 0) + 1);
+};
+
+const decrementUserSockets = (userId: string): void => {
+  const currentCount = onlineUserSocketCounts.get(userId) ?? 0;
+  if (currentCount <= 1) {
+    onlineUserSocketCounts.delete(userId);
+    return;
+  }
+  onlineUserSocketCounts.set(userId, currentCount - 1);
 };
 
 const getRoomSnapshot = async (roomId: string) => {
@@ -233,6 +265,272 @@ const getRoomSnapshot = async (roomId: string) => {
   };
 };
 
+const getAcceptedFriendIds = async (userId: string): Promise<string[]> => {
+  const relations = await prisma.friendRequest.findMany({
+    where: {
+      status: "ACCEPTED",
+      OR: [{senderId: userId}, {receiverId: userId}]
+    },
+    select: {
+      senderId: true,
+      receiverId: true
+    }
+  });
+
+  return relations.map((relation) => (relation.senderId === userId ? relation.receiverId : relation.senderId));
+};
+
+const emitFriendUpdate = (userId: string): void => {
+  io.to(getUserRoomChannel(userId)).emit("friends:update");
+};
+
+const emitFriendNetworkUpdate = async (userId: string): Promise<void> => {
+  const friendIds = await getAcceptedFriendIds(userId);
+  const targetIds = new Set([userId, ...friendIds]);
+  for (const targetId of targetIds) {
+    emitFriendUpdate(targetId);
+  }
+};
+
+const readCookieValue = (cookieHeader: string | undefined, cookieName: string): string | null => {
+  if (!cookieHeader) {
+    return null;
+  }
+
+  const cookies = cookieHeader.split(";");
+  for (const cookiePart of cookies) {
+    const [name, ...valueParts] = cookiePart.trim().split("=");
+    if (name !== cookieName) {
+      continue;
+    }
+    return decodeURIComponent(valueParts.join("="));
+  }
+
+  return null;
+};
+
+const getSocketAuthToken = (socket: Socket): string | null => {
+  const handshakeToken = socket.handshake.auth && typeof socket.handshake.auth.token === "string"
+    ? socket.handshake.auth.token
+    : null;
+  if (handshakeToken) {
+    return handshakeToken;
+  }
+
+  const authHeader = socket.handshake.headers.authorization;
+  if (typeof authHeader === "string") {
+    const [scheme, token] = authHeader.split(" ");
+    if (scheme === "Bearer" && token) {
+      return token;
+    }
+  }
+
+  return readCookieValue(socket.handshake.headers.cookie, "auth_token");
+};
+
+const joinRoomForUser = async (
+  roomId: string,
+  userId: string
+): Promise<{snapshot: Awaited<ReturnType<typeof getRoomSnapshot>>; status?: undefined; error?: undefined} | {
+  snapshot: null;
+  status: number;
+  error: string;
+}> => {
+  const room = await prisma.room.findUnique({
+    where: {id: roomId},
+    include: {
+      rounds: {
+        where: {state: "IN_PROGRESS"}
+      }
+    }
+  });
+
+  if (!room) {
+    return {snapshot: null, status: 404, error: "Room not found"};
+  }
+
+  if (room.rounds.length > 0) {
+    return {snapshot: null, status: 400, error: "Cannot join while a round is in progress"};
+  }
+
+  const existingMembership = await prisma.roomMember.findUnique({
+    where: {
+      roomId_userId: {
+        roomId: room.id,
+        userId
+      }
+    }
+  });
+
+  if (!existingMembership) {
+    const memberCount = await prisma.roomMember.count({
+      where: {roomId: room.id}
+    });
+
+    if (memberCount >= ROOM_MAX_PLAYERS) {
+      return {snapshot: null, status: 400, error: "Room full (max 4 players)"};
+    }
+
+    await prisma.roomMember.create({
+      data: {
+        roomId: room.id,
+        userId
+      }
+    });
+  }
+
+  await emitRoomUpdate(room.id);
+  const snapshot = await getRoomSnapshot(room.id);
+  if (!snapshot) {
+    return {snapshot: null, status: 404, error: "Room not found"};
+  }
+
+  return {snapshot};
+};
+
+const getFriendsSnapshot = async (userId: string) => {
+  const relations = await prisma.friendRequest.findMany({
+    where: {
+      OR: [{senderId: userId}, {receiverId: userId}]
+    },
+    include: {
+      sender: true,
+      receiver: true
+    },
+    orderBy: {
+      createdAt: "desc"
+    }
+  });
+
+  const acceptedRelations = relations.filter((relation) => relation.status === "ACCEPTED");
+  const friendIds = acceptedRelations.map((relation) => (relation.senderId === userId ? relation.receiverId : relation.senderId));
+  const uniqueFriendIds = [...new Set(friendIds)];
+
+  const latestRoomByFriendId = new Map<
+    string,
+    {
+      roomId: string;
+      roomName: string;
+      roomCode: string;
+      hasActiveRound: boolean;
+      memberCount: number;
+    }
+  >();
+  const roomIdsForMyMembershipCheck: string[] = [];
+
+  if (uniqueFriendIds.length > 0) {
+    const memberships = await prisma.roomMember.findMany({
+      where: {
+        userId: {
+          in: uniqueFriendIds
+        }
+      },
+      include: {
+        room: {
+          include: {
+            rounds: {
+              where: {state: "IN_PROGRESS"}
+            },
+            _count: {
+              select: {members: true}
+            }
+          }
+        }
+      },
+      orderBy: {
+        joinedAt: "desc"
+      }
+    });
+
+    for (const membership of memberships) {
+      if (latestRoomByFriendId.has(membership.userId)) {
+        continue;
+      }
+
+      latestRoomByFriendId.set(membership.userId, {
+        roomId: membership.room.id,
+        roomName: membership.room.name,
+        roomCode: membership.room.code,
+        hasActiveRound: membership.room.rounds.length > 0,
+        memberCount: membership.room._count.members
+      });
+      roomIdsForMyMembershipCheck.push(membership.room.id);
+    }
+  }
+
+  const myRoomMemberships = roomIdsForMyMembershipCheck.length > 0
+    ? await prisma.roomMember.findMany({
+      where: {
+        userId,
+        roomId: {
+          in: roomIdsForMyMembershipCheck
+        }
+      },
+      select: {
+        roomId: true
+      }
+    })
+    : [];
+  const myMembershipRoomIdSet = new Set(myRoomMemberships.map((membership) => membership.roomId));
+
+  const friends = acceptedRelations
+    .map((relation) => {
+      const friendUser = relation.senderId === userId ? relation.receiver : relation.sender;
+      const friendRoom = latestRoomByFriendId.get(friendUser.id);
+      const room = friendRoom
+        ? {
+          roomId: friendRoom.roomId,
+          roomName: friendRoom.roomName,
+          roomCode: friendRoom.roomCode,
+          hasActiveRound: friendRoom.hasActiveRound,
+          canJoin: !friendRoom.hasActiveRound && (myMembershipRoomIdSet.has(friendRoom.roomId) || friendRoom.memberCount < ROOM_MAX_PLAYERS)
+        }
+        : null;
+
+      return {
+        userId: friendUser.id,
+        displayName: friendUser.name ?? friendUser.email,
+        email: friendUser.email,
+        avatarUrl: friendUser.avatarUrl,
+        isOnline: isUserOnline(friendUser.id),
+        room
+      };
+    })
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+
+  const incomingRequests = relations
+    .filter((relation) => relation.status === "PENDING" && relation.receiverId === userId)
+    .map((relation) => ({
+      requestId: relation.id,
+      createdAt: relation.createdAt,
+      from: {
+        userId: relation.sender.id,
+        displayName: relation.sender.name ?? relation.sender.email,
+        email: relation.sender.email,
+        avatarUrl: relation.sender.avatarUrl
+      }
+    }));
+
+  const outgoingRequests = relations
+    .filter((relation) => relation.status === "PENDING" && relation.senderId === userId)
+    .map((relation) => ({
+      requestId: relation.id,
+      createdAt: relation.createdAt,
+      to: {
+        userId: relation.receiver.id,
+        displayName: relation.receiver.name ?? relation.receiver.email,
+        email: relation.receiver.email,
+        avatarUrl: relation.receiver.avatarUrl
+      }
+    }));
+
+  return {
+    friends,
+    incomingRequests,
+    outgoingRequests
+  };
+};
+
 const emitRoomUpdate = async (roomId: string): Promise<void> => {
   const snapshot = await getRoomSnapshot(roomId);
   if (!snapshot) {
@@ -257,9 +555,41 @@ const requireRoomMembership = async (roomId: string, userId: string) => {
   });
 };
 
+io.use((socket, next) => {
+  try {
+    const token = getSocketAuthToken(socket);
+    if (!token) {
+      next(new Error("Unauthorized"));
+      return;
+    }
+
+    const socketUser = verifyAuthToken(token, env.JWT_SECRET);
+    socket.data.user = socketUser;
+    next();
+  } catch {
+    next(new Error("Unauthorized"));
+  }
+});
+
 io.on("connection", (socket) => {
+  const socketUser = socket.data.user as Express.User | undefined;
+  if (!socketUser) {
+    socket.disconnect(true);
+    return;
+  }
+
+  socketToUserId.set(socket.id, socketUser.id);
+  incrementUserSockets(socketUser.id);
+  socket.join(getUserRoomChannel(socketUser.id));
+  void emitFriendNetworkUpdate(socketUser.id);
+
   socket.on("room:subscribe", async (payload: { roomId?: string }) => {
     if (!payload?.roomId) {
+      return;
+    }
+
+    const membership = await requireRoomMembership(payload.roomId, socketUser.id);
+    if (!membership) {
       return;
     }
 
@@ -273,6 +603,16 @@ io.on("connection", (socket) => {
     }
 
     socket.leave(payload.roomId);
+  });
+
+  socket.on("disconnect", () => {
+    const disconnectedUserId = socketToUserId.get(socket.id);
+    socketToUserId.delete(socket.id);
+    if (!disconnectedUserId) {
+      return;
+    }
+    decrementUserSockets(disconnectedUserId);
+    void emitFriendNetworkUpdate(disconnectedUserId);
   });
 });
 
@@ -319,6 +659,175 @@ app.post("/auth/logout", (_req, res) => {
 
 app.get("/api/auth/me", requireAuth, (req, res) => {
   res.json({user: req.user!});
+});
+
+app.get("/api/friends", requireAuth, async (req, res, next) => {
+  try {
+    const snapshot = await getFriendsSnapshot(req.user!.id);
+    res.json(snapshot);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/friends/requests", requireAuth, async (req, res, next) => {
+  try {
+    const parsed = sendFriendRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({error: "Invalid friend request payload"});
+      return;
+    }
+
+    const targetUser = await prisma.user.findUnique({
+      where: {email: parsed.data.email}
+    });
+    if (!targetUser) {
+      res.status(404).json({error: "User not found"});
+      return;
+    }
+
+    if (targetUser.id === req.user!.id) {
+      res.status(400).json({error: "You cannot send a friend request to yourself"});
+      return;
+    }
+
+    const pairKey = makeFriendPairKey(req.user!.id, targetUser.id);
+    const existingRelation = await prisma.friendRequest.findUnique({
+      where: {pairKey}
+    });
+
+    if (!existingRelation) {
+      await prisma.friendRequest.create({
+        data: {
+          pairKey,
+          senderId: req.user!.id,
+          receiverId: targetUser.id,
+          status: "PENDING"
+        }
+      });
+      emitFriendUpdate(req.user!.id);
+      emitFriendUpdate(targetUser.id);
+      res.status(201).send();
+      return;
+    }
+
+    if (existingRelation.status === "ACCEPTED") {
+      res.status(400).json({error: "You are already friends"});
+      return;
+    }
+
+    if (existingRelation.status === "PENDING") {
+      if (existingRelation.senderId === req.user!.id) {
+        res.status(400).json({error: "Friend request already sent"});
+        return;
+      }
+
+      res.status(400).json({error: "You already have an incoming request from this user"});
+      return;
+    }
+
+    await prisma.friendRequest.update({
+      where: {id: existingRelation.id},
+      data: {
+        senderId: req.user!.id,
+        receiverId: targetUser.id,
+        status: "PENDING",
+        respondedAt: null
+      }
+    });
+
+    emitFriendUpdate(req.user!.id);
+    emitFriendUpdate(targetUser.id);
+    res.status(201).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/friends/requests/:requestId", requireAuth, async (req, res, next) => {
+  try {
+    const parsed = respondFriendRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({error: "Invalid request response payload"});
+      return;
+    }
+
+    const friendRequest = await prisma.friendRequest.findUnique({
+      where: {id: req.params.requestId}
+    });
+    if (!friendRequest) {
+      res.status(404).json({error: "Friend request not found"});
+      return;
+    }
+
+    if (friendRequest.receiverId !== req.user!.id) {
+      res.status(403).json({error: "Only the receiver can respond to this request"});
+      return;
+    }
+
+    if (friendRequest.status !== "PENDING") {
+      res.status(400).json({error: "This friend request has already been handled"});
+      return;
+    }
+
+    await prisma.friendRequest.update({
+      where: {id: friendRequest.id},
+      data: {
+        status: parsed.data.action === "accept" ? "ACCEPTED" : "DECLINED",
+        respondedAt: new Date()
+      }
+    });
+
+    if (parsed.data.action === "accept") {
+      await Promise.all([emitFriendNetworkUpdate(friendRequest.senderId), emitFriendNetworkUpdate(friendRequest.receiverId)]);
+    } else {
+      emitFriendUpdate(friendRequest.senderId);
+      emitFriendUpdate(friendRequest.receiverId);
+    }
+
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/friends/:friendUserId/join", requireAuth, async (req, res, next) => {
+  try {
+    if (req.params.friendUserId === req.user!.id) {
+      res.status(400).json({error: "Choose a friend to join their room"});
+      return;
+    }
+
+    const relation = await prisma.friendRequest.findUnique({
+      where: {
+        pairKey: makeFriendPairKey(req.user!.id, req.params.friendUserId)
+      }
+    });
+    if (!relation || relation.status !== "ACCEPTED") {
+      res.status(403).json({error: "Only friends can be joined directly"});
+      return;
+    }
+
+    const latestFriendMembership = await prisma.roomMember.findFirst({
+      where: {userId: req.params.friendUserId},
+      orderBy: {joinedAt: "desc"},
+      select: {roomId: true}
+    });
+    if (!latestFriendMembership) {
+      res.status(404).json({error: "Friend is not in any room yet"});
+      return;
+    }
+
+    const joinResult = await joinRoomForUser(latestFriendMembership.roomId, req.user!.id);
+    if (!joinResult.snapshot) {
+      res.status(joinResult.status).json({error: joinResult.error});
+      return;
+    }
+
+    res.json(joinResult.snapshot);
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post("/api/rooms", requireAuth, async (req, res, next) => {
@@ -374,41 +883,13 @@ app.post("/api/rooms/join", requireAuth, async (req, res, next) => {
       return;
     }
 
-    if (room.rounds.length > 0) {
-      res.status(400).json({error: "Cannot join while a round is in progress"});
+    const joinResult = await joinRoomForUser(room.id, req.user!.id);
+    if (!joinResult.snapshot) {
+      res.status(joinResult.status).json({error: joinResult.error});
       return;
     }
 
-    const existingMembership = await prisma.roomMember.findUnique({
-      where: {
-        roomId_userId: {
-          roomId: room.id,
-          userId: req.user!.id
-        }
-      }
-    });
-
-    if (!existingMembership) {
-      const memberCount = await prisma.roomMember.count({
-        where: {roomId: room.id}
-      });
-
-      if (memberCount >= ROOM_MAX_PLAYERS) {
-        res.status(400).json({error: "Room full (max 4 players)"});
-        return;
-      }
-
-      await prisma.roomMember.create({
-        data: {
-          roomId: room.id,
-          userId: req.user!.id
-        }
-      });
-    }
-
-    await emitRoomUpdate(room.id);
-    const snapshot = await getRoomSnapshot(room.id);
-    res.json(snapshot);
+    res.json(joinResult.snapshot);
   } catch (error) {
     next(error);
   }

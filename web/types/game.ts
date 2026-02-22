@@ -54,3 +54,48 @@ export type SessionUser = {
   name: string | null;
   avatarUrl: string | null;
 };
+
+export type FriendRoom = {
+  roomId: string;
+  roomName: string;
+  roomCode: string;
+  hasActiveRound: boolean;
+  canJoin: boolean;
+};
+
+export type Friend = {
+  userId: string;
+  displayName: string;
+  email: string;
+  avatarUrl: string | null;
+  isOnline: boolean;
+  room: FriendRoom | null;
+};
+
+export type IncomingFriendRequest = {
+  requestId: string;
+  createdAt: string;
+  from: {
+    userId: string;
+    displayName: string;
+    email: string;
+    avatarUrl: string | null;
+  };
+};
+
+export type OutgoingFriendRequest = {
+  requestId: string;
+  createdAt: string;
+  to: {
+    userId: string;
+    displayName: string;
+    email: string;
+    avatarUrl: string | null;
+  };
+};
+
+export type FriendsSnapshot = {
+  friends: Friend[];
+  incomingRequests: IncomingFriendRequest[];
+  outgoingRequests: OutgoingFriendRequest[];
+};

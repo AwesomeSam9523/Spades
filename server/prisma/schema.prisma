@@ -24,6 +24,12 @@ enum RoundPhase {
   ENDED
 }
 
+enum FriendRequestStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+}
+
 model User {
   id              String       @id @default(cuid())
   googleId        String       @unique
@@ -34,6 +40,8 @@ model User {
   memberships     RoomMember[]
   roomsLed        Room[]       @relation("RoomLeader")
   verifiedEntries RoundEntry[] @relation("VerifiedBy")
+  sentFriendRequests     FriendRequest[] @relation("FriendRequestSender")
+  receivedFriendRequests FriendRequest[] @relation("FriendRequestReceiver")
 }
 
 model Room {
@@ -93,4 +101,20 @@ model RoundEntry {
   pointsAwarded       Int?
 
   @@unique([roundId, memberId])
+}
+
+model FriendRequest {
+  id         String              @id @default(cuid())
+  pairKey    String              @unique
+  senderId   String
+  sender     User                @relation("FriendRequestSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId String
+  receiver   User                @relation("FriendRequestReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  status     FriendRequestStatus @default(PENDING)
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+  respondedAt DateTime?
+
+  @@index([senderId, status])
+  @@index([receiverId, status])
 }

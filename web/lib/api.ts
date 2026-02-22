@@ -1,4 +1,4 @@
-import type { RoomSnapshot, SessionUser } from "../types/game";
+import type { FriendsSnapshot, RoomSnapshot, SessionUser } from "../types/game";
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const AUTH_TOKEN_STORAGE_KEY = "spades_auth_token";
@@ -10,6 +10,11 @@ const getStoredAuthToken = (): string | null => {
     return null;
   }
   return window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+};
+
+export const getAuthToken = (): string | null => {
+  hydrateAuthTokenFromUrlHash();
+  return getStoredAuthToken();
 };
 
 const setStoredAuthToken = (token: string): void => {
@@ -162,6 +167,22 @@ export const kickMember = async (roomId: string, memberId: string): Promise<void
 
 export const makeLeader = async (roomId: string, memberId: string): Promise<void> => {
   await request(`/api/rooms/${roomId}/leader/${memberId}`, "PATCH");
+};
+
+export const getFriends = async (): Promise<FriendsSnapshot> => {
+  return request<FriendsSnapshot>("/api/friends", "GET");
+};
+
+export const sendFriendRequest = async (email: string): Promise<void> => {
+  await request("/api/friends/requests", "POST", { email });
+};
+
+export const respondToFriendRequest = async (requestId: string, action: "accept" | "decline"): Promise<void> => {
+  await request(`/api/friends/requests/${requestId}`, "PATCH", { action });
+};
+
+export const joinFriendRoom = async (friendUserId: string): Promise<RoomSnapshot> => {
+  return request<RoomSnapshot>(`/api/friends/${friendUserId}/join`, "POST");
 };
 
 export const logout = async (): Promise<void> => {
