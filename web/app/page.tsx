@@ -302,7 +302,6 @@ export default function HomePage() {
                 <tr>
                   <th>Name</th>
                   <th>Code</th>
-                  <th>Joined</th>
                   <th />
                 </tr>
               </thead>
@@ -313,7 +312,6 @@ export default function HomePage() {
                     <td>
                       <span className="code">{room.roomCode}</span>
                     </td>
-                    <td>{new Date(room.joinedAt).toLocaleString()}</td>
                     <td>
                       <button type="button" onClick={() => router.push(`/room/${room.roomId}`)}>
                         Open
@@ -442,21 +440,24 @@ export default function HomePage() {
                             <div className="table-name-truncate" title={friend.room.roomName}>
                               {friend.room.roomName}
                             </div>
-                            <span className="code">{friend.room.roomCode}</span>
                             {friend.room.hasActiveRound ? <div className="muted">Round in progress</div> : null}
                           </div>
                         ) : (
-                          <span className="muted">No room</span>
+                          <span className="muted">Idle</span>
                         )}
                       </td>
                       <td>
-                        <button
-                          type="button"
-                          disabled={loadingAction || !friend.room || !friend.room.canJoin}
-                          onClick={() => handleJoinFriendRoom(friend.userId)}
-                        >
-                          Join Room
-                        </button>
+                        {friend.room ? (
+                          <button
+                            type="button"
+                            disabled={loadingAction || !friend.room.canJoin}
+                            onClick={() => handleJoinFriendRoom(friend.userId)}
+                          >
+                            Join Room
+                          </button>
+                        ) : (
+                          <span className="muted">Idle</span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -477,7 +478,6 @@ export default function HomePage() {
                   <tr>
                     <th>Player</th>
                     <th>Status</th>
-                    <th>Last Played</th>
                     <th>Action</th>
                   </tr>
                 </thead>
@@ -498,7 +498,6 @@ export default function HomePage() {
                       <td>
                         <OnlineStatus online={suggestion.isOnline} />
                       </td>
-                      <td>{new Date(suggestion.lastPlayedAt).toLocaleString()}</td>
                       <td>
                         <button
                           type="button"
