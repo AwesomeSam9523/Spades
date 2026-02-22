@@ -405,13 +405,12 @@ export default function HomePage() {
           {friendsSnapshot.friends.length === 0 ? (
             <p className="muted">No friends yet.</p>
           ) : (
-            <div className="table-wrap">
-              <table>
+            <div className="table-wrap no-scroll friends-wrap">
+              <table className="friends-table">
                 <thead>
                   <tr>
                     <th>Friend</th>
                     <th>Room</th>
-                    <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -428,24 +427,12 @@ export default function HomePage() {
                       </td>
                       <td>
                         {friend.room ? (
-                          <div>
-                            <div className="table-name-truncate" title={friend.room.roomName}>
-                              {friend.room.roomName}
-                            </div>
-                            {friend.room.hasActiveRound ? <div className="muted">Round in progress</div> : null}
-                          </div>
-                        ) : (
-                          <span className="muted">Idle</span>
-                        )}
-                      </td>
-                      <td>
-                        {friend.room ? (
                           <button
                             type="button"
                             disabled={loadingAction || !friend.room.canJoin}
                             onClick={() => handleJoinFriendRoom(friend.userId)}
                           >
-                            Join Room
+                            Join
                           </button>
                         ) : (
                           <span className="muted">Idle</span>

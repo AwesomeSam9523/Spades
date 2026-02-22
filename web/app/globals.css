@@ -332,9 +332,25 @@ table {
   table-layout: fixed;
 }
 
+.friends-table {
+  table-layout: fixed;
+}
+
+.friends-wrap .player-cell {
+  min-width: 0;
+}
+
+.friends-table th:last-child,
+.friends-table td:last-child {
+  width: 110px;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .suggestions-table th:last-child,
 .suggestions-table td:last-child {
   width: 120px;
+  text-align: right;
   white-space: nowrap;
 }
 
@@ -387,6 +403,10 @@ td {
     min-width: 520px;
   }
 
+  .table-wrap.no-scroll table {
+    min-width: 0;
+  }
+
   .leaderboard-table th:last-child,
   .leaderboard-table td:last-child {
     width: 84px;
@@ -404,6 +424,11 @@ td {
   .players-table th:nth-child(2),
   .players-table td:nth-child(2) {
     width: 72px;
+  }
+
+  .friends-table th:last-child,
+  .friends-table td:last-child {
+    width: 100px;
   }
 
   .email-truncate {
@@ -446,6 +471,10 @@ td {
     min-width: 500px;
   }
 
+  .table-wrap.no-scroll table {
+    min-width: 0;
+  }
+
   .leaderboard-table th:last-child,
   .leaderboard-table td:last-child {
     width: 76px;
@@ -463,6 +492,11 @@ td {
   .players-table th:nth-child(2),
   .players-table td:nth-child(2) {
     width: 68px;
+  }
+
+  .friends-table th:last-child,
+  .friends-table td:last-child {
+    width: 92px;
   }
 
   .inline-input-action {
