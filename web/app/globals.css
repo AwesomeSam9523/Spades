@@ -170,6 +170,21 @@ input {
   min-width: 0;
 }
 
+.presence-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.presence-dot.online {
+  background: #2d6bff;
+}
+
+.presence-dot.offline {
+  background: #cc4a4a;
+}
+
 .stack {
   display: grid;
   gap: 8px;
@@ -184,6 +199,16 @@ input {
   justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.inline-input-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inline-input-action input {
+  flex: 1;
 }
 
 .player-name {
@@ -287,12 +312,42 @@ table {
   min-width: 560px;
 }
 
+.table-wrap.no-scroll {
+  overflow-x: visible;
+}
+
+.table-wrap.no-scroll table {
+  min-width: 0;
+}
+
 .players-wrap.no-scroll {
   overflow-x: visible;
 }
 
 .players-wrap.no-scroll table {
   min-width: 0;
+}
+
+.suggestions-table {
+  table-layout: fixed;
+}
+
+.suggestions-table th:last-child,
+.suggestions-table td:last-child {
+  width: 120px;
+  white-space: nowrap;
+}
+
+.suggestions-wrap .player-cell > div {
+  min-width: 0;
+}
+
+.email-truncate {
+  display: block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 th,
@@ -350,6 +405,10 @@ td {
   .players-table td:nth-child(2) {
     width: 72px;
   }
+
+  .email-truncate {
+    max-width: 170px;
+  }
 }
 
 @media (max-width: 640px) {
@@ -404,5 +463,18 @@ td {
   .players-table th:nth-child(2),
   .players-table td:nth-child(2) {
     width: 68px;
+  }
+
+  .inline-input-action {
+    flex-wrap: wrap;
+  }
+
+  .suggestions-table th:last-child,
+  .suggestions-table td:last-child {
+    width: 104px;
+  }
+
+  .email-truncate {
+    max-width: 130px;
   }
 }

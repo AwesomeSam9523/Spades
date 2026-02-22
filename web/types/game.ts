@@ -58,7 +58,6 @@ export type SessionUser = {
 export type FriendRoom = {
   roomId: string;
   roomName: string;
-  roomCode: string;
   hasActiveRound: boolean;
   canJoin: boolean;
 };

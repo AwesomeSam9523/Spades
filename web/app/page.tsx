@@ -41,12 +41,8 @@ function Avatar({ name, src }: { name: string; src: string | null }) {
   return <span className="avatar avatar-fallback">{name.slice(0, 1).toUpperCase()}</span>;
 }
 
-function OnlineStatus({ online }: { online: boolean }) {
-  return (
-    <span className={online ? "status ok" : "status"}>
-      {online ? "Online" : "Offline"}
-    </span>
-  );
+function PresenceDot({ online }: { online: boolean }) {
+  return <span className={`presence-dot ${online ? "online" : "offline"}`} aria-hidden="true" />;
 }
 
 export default function HomePage() {
@@ -330,18 +326,17 @@ export default function HomePage() {
         <div style={{ marginTop: 12 }}>
           <h3>Friend Requests</h3>
           <form onSubmit={handleSendFriendRequest}>
-            <label htmlFor="friend-email">Add by email</label>
-            <input
-              id="friend-email"
-              value={friendEmail}
-              onChange={(event) => setFriendEmail(event.target.value)}
-              placeholder="friend@gmail.com"
-              type="email"
-              required
-            />
-            <div style={{ marginTop: 10 }}>
+            <div className="inline-input-action">
+              <input
+                id="friend-email"
+                value={friendEmail}
+                onChange={(event) => setFriendEmail(event.target.value)}
+                placeholder="friend@gmail.com"
+                type="email"
+                required
+              />
               <button disabled={loadingAction} type="submit">
-                Send Request
+                Send
               </button>
             </div>
           </form>
@@ -415,7 +410,6 @@ export default function HomePage() {
                 <thead>
                   <tr>
                     <th>Friend</th>
-                    <th>Status</th>
                     <th>Room</th>
                     <th>Action</th>
                   </tr>
@@ -426,13 +420,11 @@ export default function HomePage() {
                       <td>
                         <div className="player-cell">
                           <Avatar name={friend.displayName} src={friend.avatarUrl} />
+                          <PresenceDot online={friend.isOnline} />
                           <span className="table-name-truncate" title={friend.displayName}>
                             {friend.displayName}
                           </span>
                         </div>
-                      </td>
-                      <td>
-                        <OnlineStatus online={friend.isOnline} />
                       </td>
                       <td>
                         {friend.room ? (
@@ -472,12 +464,11 @@ export default function HomePage() {
           {friendsSnapshot.suggestions.length === 0 ? (
             <p className="muted">No suggestions yet. Play more rounds to discover people.</p>
           ) : (
-            <div className="table-wrap">
-              <table>
+            <div className="table-wrap no-scroll suggestions-wrap">
+              <table className="suggestions-table">
                 <thead>
                   <tr>
                     <th>Player</th>
-                    <th>Status</th>
                     <th>Action</th>
                   </tr>
                 </thead>
@@ -487,16 +478,16 @@ export default function HomePage() {
                       <td>
                         <div className="player-cell">
                           <Avatar name={suggestion.displayName} src={suggestion.avatarUrl} />
+                          <PresenceDot online={suggestion.isOnline} />
                           <div>
                             <div className="table-name-truncate" title={suggestion.displayName}>
                               {suggestion.displayName}
                             </div>
-                            <div className="muted">{suggestion.email}</div>
+                            <div className="muted email-truncate" title={suggestion.email}>
+                              {suggestion.email}
+                            </div>
                           </div>
                         </div>
-                      </td>
-                      <td>
-                        <OnlineStatus online={suggestion.isOnline} />
                       </td>
                       <td>
                         <button
@@ -504,7 +495,7 @@ export default function HomePage() {
                           disabled={loadingAction}
                           onClick={() => handleSuggestionFriendRequest(suggestion.email)}
                         >
-                          Send Request
+                          Send
                         </button>
                       </td>
                     </tr>

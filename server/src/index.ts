@@ -166,6 +166,8 @@ const makeFriendPairKey = (userIdA: string, userIdB: string): string => {
 
 const onlineUserSocketCounts = new Map<string, number>();
 const socketToUserId = new Map<string, string>();
+const socketToSubscribedRoomId = new Map<string, string>();
+const userRoomSubscriptionCounts = new Map<string, Map<string, number>>();
 
 const getUserRoomChannel = (userId: string): string => `user:${userId}`;
 
@@ -182,6 +184,48 @@ const decrementUserSockets = (userId: string): void => {
     return;
   }
   onlineUserSocketCounts.set(userId, currentCount - 1);
+};
+
+const incrementUserRoomSubscription = (userId: string, roomId: string): void => {
+  const userCounts = userRoomSubscriptionCounts.get(userId) ?? new Map<string, number>();
+  userCounts.set(roomId, (userCounts.get(roomId) ?? 0) + 1);
+  userRoomSubscriptionCounts.set(userId, userCounts);
+};
+
+const decrementUserRoomSubscription = (userId: string, roomId: string): void => {
+  const userCounts = userRoomSubscriptionCounts.get(userId);
+  if (!userCounts) {
+    return;
+  }
+
+  const nextCount = (userCounts.get(roomId) ?? 0) - 1;
+  if (nextCount <= 0) {
+    userCounts.delete(roomId);
+  } else {
+    userCounts.set(roomId, nextCount);
+  }
+
+  if (userCounts.size === 0) {
+    userRoomSubscriptionCounts.delete(userId);
+  }
+};
+
+const getUserActiveRoomId = (userId: string): string | null => {
+  const userCounts = userRoomSubscriptionCounts.get(userId);
+  if (!userCounts || userCounts.size === 0) {
+    return null;
+  }
+
+  let selectedRoomId: string | null = null;
+  let selectedCount = -1;
+  for (const [roomId, count] of userCounts.entries()) {
+    if (count > selectedCount) {
+      selectedRoomId = roomId;
+      selectedCount = count;
+    }
+  }
+
+  return selectedRoomId;
 };
 
 const getRoomSnapshot = async (roomId: string) => {
@@ -411,65 +455,49 @@ const getFriendsSnapshot = async (userId: string) => {
   const acceptedRelations = relations.filter((relation) => relation.status === "ACCEPTED");
   const friendIds = acceptedRelations.map((relation) => (relation.senderId === userId ? relation.receiverId : relation.senderId));
   const uniqueFriendIds = [...new Set(friendIds)];
+  const activeRoomIds = [...new Set(uniqueFriendIds.map((friendId) => getUserActiveRoomId(friendId)).filter((value): value is string => Boolean(value)))];
 
-  const latestRoomByFriendId = new Map<
+  const activeRoomById = new Map<
     string,
     {
       roomId: string;
       roomName: string;
-      roomCode: string;
       hasActiveRound: boolean;
       memberCount: number;
     }
   >();
-  const roomIdsForMyMembershipCheck: string[] = [];
 
-  if (uniqueFriendIds.length > 0) {
-    const memberships = await prisma.roomMember.findMany({
+  if (activeRoomIds.length > 0) {
+    const activeRooms = await prisma.room.findMany({
       where: {
-        userId: {
-          in: uniqueFriendIds
-        }
+        id: {in: activeRoomIds}
       },
       include: {
-        room: {
-          include: {
-            rounds: {
-              where: {state: "IN_PROGRESS"}
-            },
-            _count: {
-              select: {members: true}
-            }
-          }
+        rounds: {
+          where: {state: "IN_PROGRESS"}
+        },
+        _count: {
+          select: {members: true}
         }
-      },
-      orderBy: {
-        joinedAt: "desc"
       }
     });
 
-    for (const membership of memberships) {
-      if (latestRoomByFriendId.has(membership.userId)) {
-        continue;
-      }
-
-      latestRoomByFriendId.set(membership.userId, {
-        roomId: membership.room.id,
-        roomName: membership.room.name,
-        roomCode: membership.room.code,
-        hasActiveRound: membership.room.rounds.length > 0,
-        memberCount: membership.room._count.members
+    for (const room of activeRooms) {
+      activeRoomById.set(room.id, {
+        roomId: room.id,
+        roomName: room.name,
+        hasActiveRound: room.rounds.length > 0,
+        memberCount: room._count.members
       });
-      roomIdsForMyMembershipCheck.push(membership.room.id);
     }
   }
 
-  const myRoomMemberships = roomIdsForMyMembershipCheck.length > 0
+  const myRoomMemberships = activeRoomIds.length > 0
     ? await prisma.roomMember.findMany({
       where: {
         userId,
         roomId: {
-          in: roomIdsForMyMembershipCheck
+          in: activeRoomIds
         }
       },
       select: {
@@ -482,14 +510,14 @@ const getFriendsSnapshot = async (userId: string) => {
   const friends = acceptedRelations
     .map((relation) => {
       const friendUser = relation.senderId === userId ? relation.receiver : relation.sender;
-      const friendRoom = latestRoomByFriendId.get(friendUser.id);
-      const room = friendRoom
+      const activeRoomId = getUserActiveRoomId(friendUser.id);
+      const activeRoom = activeRoomId ? activeRoomById.get(activeRoomId) : null;
+      const room = activeRoom
         ? {
-          roomId: friendRoom.roomId,
-          roomName: friendRoom.roomName,
-          roomCode: friendRoom.roomCode,
-          hasActiveRound: friendRoom.hasActiveRound,
-          canJoin: !friendRoom.hasActiveRound && (myMembershipRoomIdSet.has(friendRoom.roomId) || friendRoom.memberCount < ROOM_MAX_PLAYERS)
+          roomId: activeRoom.roomId,
+          roomName: activeRoom.roomName,
+          hasActiveRound: activeRoom.hasActiveRound,
+          canJoin: !activeRoom.hasActiveRound && (myMembershipRoomIdSet.has(activeRoom.roomId) || activeRoom.memberCount < ROOM_MAX_PLAYERS)
         }
         : null;
 
@@ -668,19 +696,45 @@ io.on("connection", (socket) => {
       return;
     }
 
+    const previousRoomId = socketToSubscribedRoomId.get(socket.id);
+    if (previousRoomId === payload.roomId) {
+      await emitRoomUpdate(payload.roomId);
+      return;
+    }
+
+    if (previousRoomId && previousRoomId !== payload.roomId) {
+      socket.leave(previousRoomId);
+      decrementUserRoomSubscription(socketUser.id, previousRoomId);
+    }
+
     socket.join(payload.roomId);
+    socketToSubscribedRoomId.set(socket.id, payload.roomId);
+    incrementUserRoomSubscription(socketUser.id, payload.roomId);
     await emitRoomUpdate(payload.roomId);
+    await emitFriendNetworkUpdate(socketUser.id);
   });
 
-  socket.on("room:unsubscribe", (payload: { roomId?: string }) => {
+  socket.on("room:unsubscribe", async (payload: { roomId?: string }) => {
     if (!payload?.roomId) {
       return;
     }
 
     socket.leave(payload.roomId);
+    const previousRoomId = socketToSubscribedRoomId.get(socket.id);
+    if (previousRoomId === payload.roomId) {
+      socketToSubscribedRoomId.delete(socket.id);
+      decrementUserRoomSubscription(socketUser.id, payload.roomId);
+      await emitFriendNetworkUpdate(socketUser.id);
+    }
   });
 
   socket.on("disconnect", () => {
+    const subscribedRoomId = socketToSubscribedRoomId.get(socket.id);
+    if (subscribedRoomId) {
+      socketToSubscribedRoomId.delete(socket.id);
+      decrementUserRoomSubscription(socketUser.id, subscribedRoomId);
+    }
+
     const disconnectedUserId = socketToUserId.get(socket.id);
     socketToUserId.delete(socket.id);
     if (!disconnectedUserId) {
@@ -883,17 +937,13 @@ app.post("/api/friends/:friendUserId/join", requireAuth, async (req, res, next) 
       return;
     }
 
-    const latestFriendMembership = await prisma.roomMember.findFirst({
-      where: {userId: req.params.friendUserId},
-      orderBy: {joinedAt: "desc"},
-      select: {roomId: true}
-    });
-    if (!latestFriendMembership) {
-      res.status(404).json({error: "Friend is not in any room yet"});
+    const activeFriendRoomId = getUserActiveRoomId(req.params.friendUserId);
+    if (!activeFriendRoomId) {
+      res.status(404).json({error: "Friend is idle right now"});
       return;
     }
 
-    const joinResult = await joinRoomForUser(latestFriendMembership.roomId, req.user!.id);
+    const joinResult = await joinRoomForUser(activeFriendRoomId, req.user!.id);
     if (!joinResult.snapshot) {
       res.status(joinResult.status).json({error: joinResult.error});
       return;
