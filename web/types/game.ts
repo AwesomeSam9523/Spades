@@ -94,8 +94,18 @@ export type OutgoingFriendRequest = {
   };
 };
 
+export type FriendSuggestion = {
+  userId: string;
+  displayName: string;
+  email: string;
+  avatarUrl: string | null;
+  isOnline: boolean;
+  lastPlayedAt: string;
+};
+
 export type FriendsSnapshot = {
   friends: Friend[];
   incomingRequests: IncomingFriendRequest[];
   outgoingRequests: OutgoingFriendRequest[];
+  suggestions: FriendSuggestion[];
 };

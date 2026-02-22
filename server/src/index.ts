@@ -402,6 +402,12 @@ const getFriendsSnapshot = async (userId: string) => {
     }
   });
 
+  const relationByOtherUserId = new Map<string, (typeof relations)[number]>();
+  for (const relation of relations) {
+    const otherUserId = relation.senderId === userId ? relation.receiverId : relation.senderId;
+    relationByOtherUserId.set(otherUserId, relation);
+  }
+
   const acceptedRelations = relations.filter((relation) => relation.status === "ACCEPTED");
   const friendIds = acceptedRelations.map((relation) => (relation.senderId === userId ? relation.receiverId : relation.senderId));
   const uniqueFriendIds = [...new Set(friendIds)];
@@ -524,10 +530,80 @@ const getFriendsSnapshot = async (userId: string) => {
       }
     }));
 
+  const playedRoomIdsResult = await prisma.round.findMany({
+    where: {
+      room: {
+        members: {
+          some: {userId}
+        }
+      }
+    },
+    select: {
+      roomId: true
+    },
+    distinct: ["roomId"]
+  });
+  const playedRoomIds = playedRoomIdsResult.map((result) => result.roomId);
+
+  const suggestions: {
+    userId: string;
+    displayName: string;
+    email: string;
+    avatarUrl: string | null;
+    isOnline: boolean;
+    lastPlayedAt: Date;
+  }[] = [];
+
+  if (playedRoomIds.length > 0) {
+    const playedWithMemberships = await prisma.roomMember.findMany({
+      where: {
+        roomId: {
+          in: playedRoomIds
+        },
+        userId: {
+          not: userId
+        }
+      },
+      include: {
+        user: true
+      },
+      orderBy: {
+        joinedAt: "desc"
+      }
+    });
+
+    const seenUserIds = new Set<string>();
+    for (const membership of playedWithMemberships) {
+      if (seenUserIds.has(membership.userId)) {
+        continue;
+      }
+      seenUserIds.add(membership.userId);
+
+      const existingRelation = relationByOtherUserId.get(membership.userId);
+      if (existingRelation?.status === "ACCEPTED" || existingRelation?.status === "PENDING") {
+        continue;
+      }
+
+      suggestions.push({
+        userId: membership.userId,
+        displayName: membership.user.name ?? membership.user.email,
+        email: membership.user.email,
+        avatarUrl: membership.user.avatarUrl,
+        isOnline: isUserOnline(membership.userId),
+        lastPlayedAt: membership.joinedAt
+      });
+
+      if (suggestions.length >= 10) {
+        break;
+      }
+    }
+  }
+
   return {
     friends,
     incomingRequests,
-    outgoingRequests
+    outgoingRequests,
+    suggestions
   };
 };
 
@@ -563,8 +639,7 @@ io.use((socket, next) => {
       return;
     }
 
-    const socketUser = verifyAuthToken(token, env.JWT_SECRET);
-    socket.data.user = socketUser;
+    socket.data.user = verifyAuthToken(token, env.JWT_SECRET);
     next();
   } catch {
     next(new Error("Unauthorized"));

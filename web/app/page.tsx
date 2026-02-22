@@ -29,7 +29,8 @@ type MyRoom = {
 const emptyFriendsSnapshot: FriendsSnapshot = {
   friends: [],
   incomingRequests: [],
-  outgoingRequests: []
+  outgoingRequests: [],
+  suggestions: []
 };
 
 function Avatar({ name, src }: { name: string; src: string | null }) {
@@ -144,6 +145,21 @@ export default function HomePage() {
     try {
       await sendFriendRequest(friendEmail.trim().toLowerCase());
       setFriendEmail("");
+      const latestSnapshot = await getFriends();
+      setFriendsSnapshot(latestSnapshot);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to send friend request");
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
+  const handleSuggestionFriendRequest = async (email: string) => {
+    setLoadingAction(true);
+    setError(null);
+
+    try {
+      await sendFriendRequest(email.trim().toLowerCase());
       const latestSnapshot = await getFriends();
       setFriendsSnapshot(latestSnapshot);
     } catch (err) {
@@ -313,10 +329,10 @@ export default function HomePage() {
 
       <section className="card">
         <h2>Friends</h2>
-        <div className="grid grid-2" style={{ marginTop: 12 }}>
+        <div style={{ marginTop: 12 }}>
+          <h3>Friend Requests</h3>
           <form onSubmit={handleSendFriendRequest}>
-            <h3>Add Friend</h3>
-            <label htmlFor="friend-email">Friend email</label>
+            <label htmlFor="friend-email">Add by email</label>
             <input
               id="friend-email"
               value={friendEmail}
@@ -332,65 +348,67 @@ export default function HomePage() {
             </div>
           </form>
 
-          <div>
-            <h3>Incoming Requests</h3>
-            {friendsSnapshot.incomingRequests.length === 0 ? (
-              <p className="muted">No incoming requests.</p>
-            ) : (
-              <div className="stack">
-                {friendsSnapshot.incomingRequests.map((request) => (
-                  <div key={request.requestId} className="friend-request-row">
-                    <div className="player-cell">
-                      <Avatar name={request.from.displayName} src={request.from.avatarUrl} />
-                      <div>
-                        <div>{request.from.displayName}</div>
-                        <div className="muted">{request.from.email}</div>
+          <div className="grid grid-2" style={{ marginTop: 12 }}>
+            <div>
+              <h3>Incoming</h3>
+              {friendsSnapshot.incomingRequests.length === 0 ? (
+                <p className="muted">No incoming requests.</p>
+              ) : (
+                <div className="stack">
+                  {friendsSnapshot.incomingRequests.map((request) => (
+                    <div key={request.requestId} className="friend-request-row">
+                      <div className="player-cell">
+                        <Avatar name={request.from.displayName} src={request.from.avatarUrl} />
+                        <div>
+                          <div>{request.from.displayName}</div>
+                          <div className="muted">{request.from.email}</div>
+                        </div>
+                      </div>
+                      <div className="row">
+                        <button disabled={loadingAction} type="button" onClick={() => handleFriendRequestAction(request.requestId, "accept")}>
+                          Accept
+                        </button>
+                        <button
+                          disabled={loadingAction}
+                          type="button"
+                          className="secondary"
+                          onClick={() => handleFriendRequestAction(request.requestId, "decline")}
+                        >
+                          Decline
+                        </button>
                       </div>
                     </div>
-                    <div className="row">
-                      <button disabled={loadingAction} type="button" onClick={() => handleFriendRequestAction(request.requestId, "accept")}>
-                        Accept
-                      </button>
-                      <button
-                        disabled={loadingAction}
-                        type="button"
-                        className="secondary"
-                        onClick={() => handleFriendRequestAction(request.requestId, "decline")}
-                      >
-                        Decline
-                      </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <h3>Outgoing</h3>
+              {friendsSnapshot.outgoingRequests.length === 0 ? (
+                <p className="muted">No outgoing requests.</p>
+              ) : (
+                <div className="stack">
+                  {friendsSnapshot.outgoingRequests.map((request) => (
+                    <div key={request.requestId} className="friend-request-row">
+                      <div className="player-cell">
+                        <Avatar name={request.to.displayName} src={request.to.avatarUrl} />
+                        <div>
+                          <div>{request.to.displayName}</div>
+                          <div className="muted">{request.to.email}</div>
+                        </div>
+                      </div>
+                      <span className="status">Pending</span>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        <div style={{ marginTop: 16 }}>
-          <h3>Outgoing Requests</h3>
-          {friendsSnapshot.outgoingRequests.length === 0 ? (
-            <p className="muted">No outgoing requests.</p>
-          ) : (
-            <div className="stack">
-              {friendsSnapshot.outgoingRequests.map((request) => (
-                <div key={request.requestId} className="friend-request-row">
-                  <div className="player-cell">
-                    <Avatar name={request.to.displayName} src={request.to.avatarUrl} />
-                    <div>
-                      <div>{request.to.displayName}</div>
-                      <div className="muted">{request.to.email}</div>
-                    </div>
-                  </div>
-                  <span className="status">Pending</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div style={{ marginTop: 16 }}>
-          <h3>Friends List</h3>
+        <div style={{ marginTop: 20 }}>
+          <h3>Friends</h3>
           {friendsSnapshot.friends.length === 0 ? (
             <p className="muted">No friends yet.</p>
           ) : (
@@ -438,6 +456,56 @@ export default function HomePage() {
                           onClick={() => handleJoinFriendRoom(friend.userId)}
                         >
                           Join Room
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div style={{ marginTop: 20 }}>
+          <h3>Friend Suggestions</h3>
+          {friendsSnapshot.suggestions.length === 0 ? (
+            <p className="muted">No suggestions yet. Play more rounds to discover people.</p>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Player</th>
+                    <th>Status</th>
+                    <th>Last Played</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {friendsSnapshot.suggestions.map((suggestion) => (
+                    <tr key={suggestion.userId}>
+                      <td>
+                        <div className="player-cell">
+                          <Avatar name={suggestion.displayName} src={suggestion.avatarUrl} />
+                          <div>
+                            <div className="table-name-truncate" title={suggestion.displayName}>
+                              {suggestion.displayName}
+                            </div>
+                            <div className="muted">{suggestion.email}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <OnlineStatus online={suggestion.isOnline} />
+                      </td>
+                      <td>{new Date(suggestion.lastPlayedAt).toLocaleString()}</td>
+                      <td>
+                        <button
+                          type="button"
+                          disabled={loadingAction}
+                          onClick={() => handleSuggestionFriendRequest(suggestion.email)}
+                        >
+                          Send Request
                         </button>
                       </td>
                     </tr>
