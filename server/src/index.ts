@@ -272,40 +272,55 @@ const getRoomSnapshot = async (roomId: string) => {
 
   const leaderboard = [...members].sort((a, b) => b.totalPoints - a.totalPoints);
 
-  const allTimeScoreByUser = new Map<
-    string,
-    {
+  const memberProfileByUserId = new Map(
+    members.map((member) => [
+      member.userId,
+      {
+        displayName: member.displayName,
+        email: member.email,
+        avatarUrl: member.avatarUrl
+      }
+    ])
+  );
+
+  const memberUserIds = members.map((member) => member.userId);
+  const allTimeTotals = memberUserIds.length > 0
+    ? await prisma.roomMember.groupBy({
+      by: ["userId"],
+      where: {
+        userId: {
+          in: memberUserIds
+        }
+      },
+      _sum: {
+        totalPoints: true
+      }
+    })
+    : [];
+
+  const allTimeScores = allTimeTotals
+    .map((record) => {
+      const profile = memberProfileByUserId.get(record.userId);
+      if (!profile) {
+        return null;
+      }
+
+      return {
+        userId: record.userId,
+        displayName: profile.displayName,
+        email: profile.email,
+        avatarUrl: profile.avatarUrl,
+        score: record._sum.totalPoints ?? 0
+      };
+    })
+    .filter((record): record is {
       userId: string;
       displayName: string;
       email: string;
       avatarUrl: string | null;
       score: number;
-    }
-  >();
+    } => record != null);
 
-  for (const round of room.rounds) {
-    for (const entry of round.entries) {
-      if (entry.pointsAwarded == null) {
-        continue;
-      }
-
-      const existing = allTimeScoreByUser.get(entry.member.userId);
-      if (!existing) {
-        allTimeScoreByUser.set(entry.member.userId, {
-          userId: entry.member.userId,
-          displayName: entry.member.user.name ?? entry.member.user.email,
-          email: entry.member.user.email,
-          avatarUrl: entry.member.user.avatarUrl,
-          score: entry.pointsAwarded
-        });
-        continue;
-      }
-
-      existing.score += entry.pointsAwarded;
-    }
-  }
-
-  const allTimeScores = [...allTimeScoreByUser.values()];
   const highestScore = allTimeScores.length > 0 ? Math.max(...allTimeScores.map((record) => record.score)) : null;
   const lowestScore = allTimeScores.length > 0 ? Math.min(...allTimeScores.map((record) => record.score)) : null;
 
