@@ -644,7 +644,7 @@ export default function RoomPage() {
             </div>
             <div className="record-holder-list">
               {highestRecordHolders.length === 0 ? (
-                <p className="muted">No scores yet.</p>
+                <p className="muted">No completed sets yet.</p>
               ) : (
                 highestRecordHolders.map((member) => (
                   <div key={`highest-${member.userId}`} className="record-holder-row">
@@ -668,7 +668,7 @@ export default function RoomPage() {
             </div>
             <div className="record-holder-list">
               {lowestRecordHolders.length === 0 ? (
-                <p className="muted">No scores yet.</p>
+                <p className="muted">No completed sets yet.</p>
               ) : (
                 lowestRecordHolders.map((member) => (
                   <div key={`lowest-${member.userId}`} className="record-holder-row">

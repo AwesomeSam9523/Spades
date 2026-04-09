@@ -289,19 +289,22 @@ const getRoomSnapshot = async (roomId: string) => {
     ])
   );
 
-  const closedRoundCountBySet = new Map<number, number>();
+  const closedRoundNumbersBySet = new Map<number, Set<number>>();
   for (const round of room.rounds) {
     if (round.state !== "CLOSED") {
       continue;
     }
 
     const setNumber = getSetNumberForRound(round.roundNumber);
-    closedRoundCountBySet.set(setNumber, (closedRoundCountBySet.get(setNumber) ?? 0) + 1);
+    const roundInSet = ((Math.max(round.roundNumber, 1) - 1) % ROUNDS_PER_SET) + 1;
+    const closedRoundsInSet = closedRoundNumbersBySet.get(setNumber) ?? new Set<number>();
+    closedRoundsInSet.add(roundInSet);
+    closedRoundNumbersBySet.set(setNumber, closedRoundsInSet);
   }
 
   const completedSetNumbers = new Set(
-    [...closedRoundCountBySet.entries()]
-      .filter(([, roundCount]) => roundCount === ROUNDS_PER_SET)
+    [...closedRoundNumbersBySet.entries()]
+      .filter(([, closedRoundsInSet]) => closedRoundsInSet.size === ROUNDS_PER_SET)
       .map(([setNumber]) => setNumber)
   );
 
@@ -317,22 +320,23 @@ const getRoomSnapshot = async (roomId: string) => {
     }
 
     for (const entry of round.entries) {
-      if (entry.pointsAwarded == null) {
+      if (entry.pointsAwarded == null && entry.verifiedWinningHands == null) {
         continue;
       }
 
+      const roundPoints = entry.pointsAwarded ?? computeRoundPoints(entry.calledHands, entry.verifiedWinningHands ?? 0, entry.blindCall);
       const userId = entry.member.userId;
       const key = `${setNumber}:${userId}`;
       const existingScore = setScoreByPlayer.get(key);
       if (existingScore) {
-        existingScore.score += entry.pointsAwarded;
+        existingScore.score += roundPoints;
         continue;
       }
 
       setScoreByPlayer.set(key, {
         userId,
         setNumber,
-        score: entry.pointsAwarded
+        score: roundPoints
       });
     }
   }
