@@ -272,6 +272,43 @@ const getRoomSnapshot = async (roomId: string) => {
 
   const leaderboard = [...members].sort((a, b) => b.totalPoints - a.totalPoints);
 
+  const allTimeScoreByUser = new Map<
+    string,
+    {
+      userId: string;
+      displayName: string;
+      email: string;
+      avatarUrl: string | null;
+      score: number;
+    }
+  >();
+
+  for (const round of room.rounds) {
+    for (const entry of round.entries) {
+      if (entry.pointsAwarded == null) {
+        continue;
+      }
+
+      const existing = allTimeScoreByUser.get(entry.member.userId);
+      if (!existing) {
+        allTimeScoreByUser.set(entry.member.userId, {
+          userId: entry.member.userId,
+          displayName: entry.member.user.name ?? entry.member.user.email,
+          email: entry.member.user.email,
+          avatarUrl: entry.member.user.avatarUrl,
+          score: entry.pointsAwarded
+        });
+        continue;
+      }
+
+      existing.score += entry.pointsAwarded;
+    }
+  }
+
+  const allTimeScores = [...allTimeScoreByUser.values()];
+  const highestScore = allTimeScores.length > 0 ? Math.max(...allTimeScores.map((record) => record.score)) : null;
+  const lowestScore = allTimeScores.length > 0 ? Math.min(...allTimeScores.map((record) => record.score)) : null;
+
   return {
     room: {
       id: room.id,
@@ -305,7 +342,13 @@ const getRoomSnapshot = async (roomId: string) => {
         pointsAwarded: entry.pointsAwarded
       }))
     })),
-    leaderboard
+    leaderboard,
+    allTimeRecords: {
+      highestScore,
+      lowestScore,
+      highestHolders: highestScore == null ? [] : allTimeScores.filter((record) => record.score === highestScore),
+      lowestHolders: lowestScore == null ? [] : allTimeScores.filter((record) => record.score === lowestScore)
+    }
   };
 };
 
@@ -381,20 +424,11 @@ const joinRoomForUser = async (
   error: string;
 }> => {
   const room = await prisma.room.findUnique({
-    where: {id: roomId},
-    include: {
-      rounds: {
-        where: {state: "IN_PROGRESS"}
-      }
-    }
+    where: {id: roomId}
   });
 
   if (!room) {
     return {snapshot: null, status: 404, error: "Room not found"};
-  }
-
-  if (room.rounds.length > 0) {
-    return {snapshot: null, status: 400, error: "Cannot join while a round is in progress"};
   }
 
   const existingMembership = await prisma.roomMember.findUnique({
@@ -517,7 +551,7 @@ const getFriendsSnapshot = async (userId: string) => {
           roomId: activeRoom.roomId,
           roomName: activeRoom.roomName,
           hasActiveRound: activeRoom.hasActiveRound,
-          canJoin: !activeRoom.hasActiveRound && (myMembershipRoomIdSet.has(activeRoom.roomId) || activeRoom.memberCount < ROOM_MAX_PLAYERS)
+          canJoin: myMembershipRoomIdSet.has(activeRoom.roomId) || activeRoom.memberCount < ROOM_MAX_PLAYERS
         }
         : null;
 

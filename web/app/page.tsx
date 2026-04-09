@@ -26,6 +26,8 @@ type MyRoom = {
   joinedAt: string;
 };
 
+const ROOM_PAGE_SIZE = 5;
+
 const emptyFriendsSnapshot: FriendsSnapshot = {
   friends: [],
   incomingRequests: [],
@@ -55,6 +57,7 @@ export default function HomePage() {
   const [joinCode, setJoinCode] = useState("");
   const [friendEmail, setFriendEmail] = useState("");
   const [rooms, setRooms] = useState<MyRoom[]>([]);
+  const [visibleRoomCount, setVisibleRoomCount] = useState(ROOM_PAGE_SIZE);
   const [friendsSnapshot, setFriendsSnapshot] = useState<FriendsSnapshot>(emptyFriendsSnapshot);
 
   const loginUrl = useMemo(() => getGoogleLoginUrl(), []);
@@ -199,8 +202,12 @@ export default function HomePage() {
     await logout();
     setUser(null);
     setRooms([]);
+    setVisibleRoomCount(ROOM_PAGE_SIZE);
     setFriendsSnapshot(emptyFriendsSnapshot);
   };
+
+  const visibleRooms = rooms.slice(0, visibleRoomCount);
+  const hasMoreRooms = rooms.length > visibleRooms.length;
 
   if (authLoading) {
     return (
@@ -292,31 +299,29 @@ export default function HomePage() {
         {rooms.length === 0 ? (
           <p className="muted">No rooms yet.</p>
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Code</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {rooms.map((room) => (
-                  <tr key={room.roomId}>
-                    <td>{room.roomName}</td>
-                    <td>
-                      <span className="code">{room.roomCode}</span>
-                    </td>
-                    <td>
-                      <button type="button" onClick={() => router.push(`/room/${room.roomId}`)}>
-                        Open
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="room-list">
+            {visibleRooms.map((room) => (
+              <div key={room.roomId} className="room-list-item">
+                <div>
+                  <div className="room-list-name" title={room.roomName}>
+                    {room.roomName}
+                  </div>
+                  <div>
+                    <span className="code">{room.roomCode}</span>
+                  </div>
+                </div>
+                <button type="button" onClick={() => router.push(`/room/${room.roomId}`)}>
+                  Open
+                </button>
+              </div>
+            ))}
+            {hasMoreRooms ? (
+              <div className="room-list-actions">
+                <button type="button" className="secondary" onClick={() => setVisibleRoomCount((count) => count + ROOM_PAGE_SIZE)}>
+                  Load more
+                </button>
+              </div>
+            ) : null}
           </div>
         )}
       </section>

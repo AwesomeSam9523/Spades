@@ -284,6 +284,10 @@ export default function RoomPage() {
   const activeRoundMeta = activeRound ? getSetRoundMeta(activeRound.roundNumber) : null;
   const isRoomFull = snapshot.members.length >= ROOM_MAX_PLAYERS;
   const myLeaderboardPoints = snapshot.leaderboard.find((member) => member.userId === user.id)?.totalPoints ?? 0;
+  const highestScore = snapshot.allTimeRecords.highestScore;
+  const lowestScore = snapshot.allTimeRecords.lowestScore;
+  const highestRecordHolders = snapshot.allTimeRecords.highestHolders;
+  const lowestRecordHolders = snapshot.allTimeRecords.lowestHolders;
   const verifyAllLabel = everyoneVerified ? "All Verified" : "Verify All";
 
   const verifyAll = async () => {
@@ -599,36 +603,88 @@ export default function RoomPage() {
 
       <section className="card">
         <h2>Live Leaderboard</h2>
-        <table className="leaderboard-table">
-          <thead>
-            <tr>
-              <th>Player</th>
-              <th>Diff vs You</th>
-              <th>Points</th>
-            </tr>
-          </thead>
-          <tbody>
-            {snapshot.leaderboard.map((member) => {
-              const diff = member.totalPoints - myLeaderboardPoints;
-              const diffClass = diff > 0 ? "diff-positive" : diff < 0 ? "diff-negative" : "diff-neutral";
+        <div className="table-wrap no-scroll">
+          <table className="leaderboard-table">
+            <thead>
+              <tr>
+                <th>Player</th>
+                <th>Diff vs You</th>
+                <th>Points</th>
+              </tr>
+            </thead>
+            <tbody>
+              {snapshot.leaderboard.map((member) => {
+                const diff = member.totalPoints - myLeaderboardPoints;
+                const diffClass = diff > 0 ? "diff-positive" : diff < 0 ? "diff-negative" : "diff-neutral";
 
-              return (
-                <tr key={member.memberId}>
-                  <td>
+                return (
+                  <tr key={member.memberId}>
+                    <td>
+                      <div className="player-cell">
+                        <Avatar name={member.displayName} src={member.avatarUrl} small />
+                        <span className="player-name" title={member.displayName}>
+                          {member.displayName}
+                        </span>
+                      </div>
+                    </td>
+                    <td className={diffClass}>{formatDiff(diff)}</td>
+                    <td>{member.totalPoints}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="record-holders-grid">
+          <div className="record-holder-card">
+            <div className="record-holder-header">
+              <h3>All-Time Highest</h3>
+              <span className="code">{highestScore ?? "-"}</span>
+            </div>
+            <div className="record-holder-list">
+              {highestRecordHolders.length === 0 ? (
+                <p className="muted">No scores yet.</p>
+              ) : (
+                highestRecordHolders.map((member) => (
+                  <div key={`highest-${member.userId}`} className="record-holder-row">
                     <div className="player-cell">
                       <Avatar name={member.displayName} src={member.avatarUrl} small />
                       <span className="player-name" title={member.displayName}>
                         {member.displayName}
                       </span>
                     </div>
-                  </td>
-                  <td className={diffClass}>{formatDiff(diff)}</td>
-                  <td>{member.totalPoints}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                    <span className="record-holder-score">{member.score}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="record-holder-card">
+            <div className="record-holder-header">
+              <h3>All-Time Lowest</h3>
+              <span className="code">{lowestScore ?? "-"}</span>
+            </div>
+            <div className="record-holder-list">
+              {lowestRecordHolders.length === 0 ? (
+                <p className="muted">No scores yet.</p>
+              ) : (
+                lowestRecordHolders.map((member) => (
+                  <div key={`lowest-${member.userId}`} className="record-holder-row">
+                    <div className="player-cell">
+                      <Avatar name={member.displayName} src={member.avatarUrl} small />
+                      <span className="player-name" title={member.displayName}>
+                        {member.displayName}
+                      </span>
+                    </div>
+                    <span className="record-holder-score">{member.score}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
       </section>
     </main>
   );

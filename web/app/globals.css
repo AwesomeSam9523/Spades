@@ -211,6 +211,38 @@ input {
   flex: 1;
 }
 
+.room-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.room-list-item {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: #fff;
+}
+
+.room-list-name {
+  font-weight: 700;
+  margin-bottom: 6px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-list-actions {
+  margin-top: 2px;
+  display: flex;
+  justify-content: center;
+}
+
 .player-name {
   flex: 1;
   min-width: 0;
@@ -366,6 +398,46 @@ table {
   white-space: nowrap;
 }
 
+.record-holders-grid {
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.record-holder-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: #fff;
+}
+
+.record-holder-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.record-holder-list {
+  margin-top: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.record-holder-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.record-holder-score {
+  min-width: 42px;
+  text-align: right;
+  font-weight: 700;
+}
+
 th,
 td {
   padding: 8px;
@@ -433,6 +505,10 @@ td {
 
   .email-truncate {
     max-width: 170px;
+  }
+
+  .room-list-name {
+    max-width: 220px;
   }
 }
 
@@ -510,5 +586,17 @@ td {
 
   .email-truncate {
     max-width: 130px;
+  }
+
+  .room-list-item {
+    padding: 8px;
+  }
+
+  .room-list-name {
+    max-width: 160px;
+  }
+
+  .record-holders-grid {
+    grid-template-columns: 1fr;
   }
 }

@@ -8,6 +8,14 @@ export type Member = {
   isLeader: boolean;
 };
 
+export type ScoreRecordHolder = {
+  userId: string;
+  displayName: string;
+  email: string;
+  avatarUrl: string | null;
+  score: number;
+};
+
 export type RoundEntry = {
   entryId: string;
   memberId: string;
@@ -46,6 +54,12 @@ export type RoomSnapshot = {
   members: Member[];
   rounds: Round[];
   leaderboard: Member[];
+  allTimeRecords: {
+    highestScore: number | null;
+    lowestScore: number | null;
+    highestHolders: ScoreRecordHolder[];
+    lowestHolders: ScoreRecordHolder[];
+  };
 };
 
 export type SessionUser = {
