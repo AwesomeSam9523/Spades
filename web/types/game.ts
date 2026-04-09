@@ -16,6 +16,13 @@ export type ScoreRecordHolder = {
   score: number;
 };
 
+export type AllTimeRecords = {
+  highestScore: number | null;
+  lowestScore: number | null;
+  highestHolders: ScoreRecordHolder[];
+  lowestHolders: ScoreRecordHolder[];
+};
+
 export type RoundEntry = {
   entryId: string;
   memberId: string;
@@ -54,12 +61,7 @@ export type RoomSnapshot = {
   members: Member[];
   rounds: Round[];
   leaderboard: Member[];
-  allTimeRecords: {
-    highestScore: number | null;
-    lowestScore: number | null;
-    highestHolders: ScoreRecordHolder[];
-    lowestHolders: ScoreRecordHolder[];
-  };
+  allTimeRecords: AllTimeRecords;
 };
 
 export type SessionUser = {

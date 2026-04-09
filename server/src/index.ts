@@ -125,6 +125,8 @@ const getSetNumberForRound = (roundNumber: number): number => {
   return Math.floor((safeRoundNumber - 1) / ROUNDS_PER_SET) + 1;
 };
 
+const getRoundInSet = (roundNumber: number): number => ((Math.max(roundNumber, 1) - 1) % ROUNDS_PER_SET) + 1;
+
 const createUniqueRoomCode = async (): Promise<string> => {
   while (true) {
     const code = generateRoomCode();
@@ -164,6 +166,133 @@ const computeRoundPoints = (calledHands: number, verifiedHands: number, blindCal
 
   const basePoints = calledHands * 10 + (verifiedHands - calledHands);
   return blindCall ? basePoints * 2 : basePoints;
+};
+
+type AllTimeScoreRecordHolder = {
+  userId: string;
+  displayName: string;
+  email: string;
+  avatarUrl: string | null;
+  score: number;
+};
+
+type AllTimeSetRecords = {
+  highestScore: number | null;
+  lowestScore: number | null;
+  highestHolders: AllTimeScoreRecordHolder[];
+  lowestHolders: AllTimeScoreRecordHolder[];
+};
+
+const getGlobalAllTimeSetRecords = async (): Promise<AllTimeSetRecords> => {
+  const closedRounds = await prisma.round.findMany({
+    where: {state: "CLOSED"},
+    include: {
+      entries: {
+        include: {
+          member: {
+            include: {
+              user: true
+            }
+          }
+        }
+      }
+    }
+  });
+
+  const userProfileByUserId = new Map<string, {displayName: string; email: string; avatarUrl: string | null}>();
+  const closedRoundNumbersByRoomSet = new Map<string, Set<number>>();
+  for (const round of closedRounds) {
+    const setNumber = getSetNumberForRound(round.roundNumber);
+    const roomSetKey = `${round.roomId}:${setNumber}`;
+    const closedRoundsInSet = closedRoundNumbersByRoomSet.get(roomSetKey) ?? new Set<number>();
+    closedRoundsInSet.add(getRoundInSet(round.roundNumber));
+    closedRoundNumbersByRoomSet.set(roomSetKey, closedRoundsInSet);
+
+    for (const entry of round.entries) {
+      if (userProfileByUserId.has(entry.member.userId)) {
+        continue;
+      }
+
+      userProfileByUserId.set(entry.member.userId, {
+        displayName: entry.member.user.name ?? entry.member.user.email,
+        email: entry.member.user.email,
+        avatarUrl: entry.member.user.avatarUrl
+      });
+    }
+  }
+
+  const completedRoomSetKeys = new Set(
+    [...closedRoundNumbersByRoomSet.entries()]
+      .filter(([, closedRoundsInSet]) => closedRoundsInSet.size === ROUNDS_PER_SET)
+      .map(([roomSetKey]) => roomSetKey)
+  );
+
+  const setScoreByPlayer = new Map<string, {userId: string; score: number}>();
+  for (const round of closedRounds) {
+    const setNumber = getSetNumberForRound(round.roundNumber);
+    const roomSetKey = `${round.roomId}:${setNumber}`;
+    if (!completedRoomSetKeys.has(roomSetKey)) {
+      continue;
+    }
+
+    for (const entry of round.entries) {
+      if (entry.pointsAwarded == null && entry.verifiedWinningHands == null) {
+        continue;
+      }
+
+      const roundPoints = entry.pointsAwarded ?? computeRoundPoints(entry.calledHands, entry.verifiedWinningHands ?? 0, entry.blindCall);
+      const recordKey = `${roomSetKey}:${entry.member.userId}`;
+      const existingScore = setScoreByPlayer.get(recordKey);
+      if (existingScore) {
+        existingScore.score += roundPoints;
+        continue;
+      }
+
+      setScoreByPlayer.set(recordKey, {
+        userId: entry.member.userId,
+        score: roundPoints
+      });
+    }
+  }
+
+  const setScores = [...setScoreByPlayer.values()];
+  const highestScore = setScores.length > 0 ? Math.max(...setScores.map((record) => record.score)) : null;
+  const lowestScore = setScores.length > 0 ? Math.min(...setScores.map((record) => record.score)) : null;
+
+  const buildRecordHolders = (targetScore: number | null): AllTimeScoreRecordHolder[] => {
+    if (targetScore == null) {
+      return [];
+    }
+
+    const holderByUserId = new Map<string, AllTimeScoreRecordHolder>();
+    for (const record of setScores) {
+      if (record.score !== targetScore || holderByUserId.has(record.userId)) {
+        continue;
+      }
+
+      const profile = userProfileByUserId.get(record.userId);
+      if (!profile) {
+        continue;
+      }
+
+      holderByUserId.set(record.userId, {
+        userId: record.userId,
+        displayName: profile.displayName,
+        email: profile.email,
+        avatarUrl: profile.avatarUrl,
+        score: record.score
+      });
+    }
+
+    return [...holderByUserId.values()];
+  };
+
+  return {
+    highestScore,
+    lowestScore,
+    highestHolders: buildRecordHolders(highestScore),
+    lowestHolders: buildRecordHolders(lowestScore)
+  };
 };
 
 const makeFriendPairKey = (userIdA: string, userIdB: string): string => {
@@ -277,120 +406,7 @@ const getRoomSnapshot = async (roomId: string) => {
   }));
 
   const leaderboard = [...members].sort((a, b) => b.totalPoints - a.totalPoints);
-
-  const closedRounds = await prisma.round.findMany({
-    where: {state: "CLOSED"},
-    include: {
-      entries: {
-        include: {
-          member: {
-            include: {
-              user: true
-            }
-          }
-        }
-      }
-    }
-  });
-
-  const userProfileByUserId = new Map<string, {displayName: string; email: string; avatarUrl: string | null}>();
-  const closedRoundNumbersByRoomSet = new Map<string, Set<number>>();
-  for (const round of closedRounds) {
-    const setNumber = getSetNumberForRound(round.roundNumber);
-    const roundInSet = ((Math.max(round.roundNumber, 1) - 1) % ROUNDS_PER_SET) + 1;
-    const roomSetKey = `${round.roomId}:${setNumber}`;
-    const closedRoundsInSet = closedRoundNumbersByRoomSet.get(roomSetKey) ?? new Set<number>();
-    closedRoundsInSet.add(roundInSet);
-    closedRoundNumbersByRoomSet.set(roomSetKey, closedRoundsInSet);
-
-    for (const entry of round.entries) {
-      if (userProfileByUserId.has(entry.member.userId)) {
-        continue;
-      }
-
-      userProfileByUserId.set(entry.member.userId, {
-        displayName: entry.member.user.name ?? entry.member.user.email,
-        email: entry.member.user.email,
-        avatarUrl: entry.member.user.avatarUrl
-      });
-    }
-  }
-
-  const completedRoomSetKeys = new Set(
-    [...closedRoundNumbersByRoomSet.entries()]
-      .filter(([, closedRoundsInSet]) => closedRoundsInSet.size === ROUNDS_PER_SET)
-      .map(([roomSetKey]) => roomSetKey)
-  );
-
-  const setScoreByPlayer = new Map<string, {userId: string; score: number}>();
-  for (const round of closedRounds) {
-    const setNumber = getSetNumberForRound(round.roundNumber);
-    const roomSetKey = `${round.roomId}:${setNumber}`;
-    if (!completedRoomSetKeys.has(roomSetKey)) {
-      continue;
-    }
-
-    for (const entry of round.entries) {
-      if (entry.pointsAwarded == null && entry.verifiedWinningHands == null) {
-        continue;
-      }
-
-      const roundPoints = entry.pointsAwarded ?? computeRoundPoints(entry.calledHands, entry.verifiedWinningHands ?? 0, entry.blindCall);
-      const recordKey = `${roomSetKey}:${entry.member.userId}`;
-      const existingScore = setScoreByPlayer.get(recordKey);
-      if (existingScore) {
-        existingScore.score += roundPoints;
-        continue;
-      }
-
-      setScoreByPlayer.set(recordKey, {
-        userId: entry.member.userId,
-        score: roundPoints
-      });
-    }
-  }
-
-  const setScores = [...setScoreByPlayer.values()];
-  const highestScore = setScores.length > 0 ? Math.max(...setScores.map((record) => record.score)) : null;
-  const lowestScore = setScores.length > 0 ? Math.min(...setScores.map((record) => record.score)) : null;
-
-  const buildRecordHolders = (targetScore: number | null) => {
-    if (targetScore == null) {
-      return [];
-    }
-
-    const holderByUserId = new Map<string, {
-      userId: string;
-      displayName: string;
-      email: string;
-      avatarUrl: string | null;
-      score: number;
-    }>();
-
-    for (const record of setScores) {
-      if (record.score !== targetScore || holderByUserId.has(record.userId)) {
-        continue;
-      }
-
-      const profile = userProfileByUserId.get(record.userId);
-      if (!profile) {
-        continue;
-      }
-
-      holderByUserId.set(record.userId, {
-        userId: record.userId,
-        displayName: profile.displayName,
-        email: profile.email,
-        avatarUrl: profile.avatarUrl,
-        score: record.score
-      });
-    }
-
-    return [...holderByUserId.values()];
-  };
-
-  const highestHolders = buildRecordHolders(highestScore);
-  const lowestHolders = buildRecordHolders(lowestScore);
+  const allTimeRecords = await getGlobalAllTimeSetRecords();
 
   return {
     room: {
@@ -426,12 +442,7 @@ const getRoomSnapshot = async (roomId: string) => {
       }))
     })),
     leaderboard,
-    allTimeRecords: {
-      highestScore,
-      lowestScore,
-      highestHolders,
-      lowestHolders
-    }
+    allTimeRecords
   };
 };
 
@@ -1157,6 +1168,15 @@ app.get("/api/rooms/mine", requireAuth, async (req, res, next) => {
         joinedAt: membership.joinedAt
       }))
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/records/global", requireAuth, async (_req, res, next) => {
+  try {
+    const records = await getGlobalAllTimeSetRecords();
+    res.json(records);
   } catch (error) {
     next(error);
   }

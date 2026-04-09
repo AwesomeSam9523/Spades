@@ -1,4 +1,4 @@
-import type { FriendsSnapshot, RoomSnapshot, SessionUser } from "../types/game";
+import type { AllTimeRecords, FriendsSnapshot, RoomSnapshot, SessionUser } from "../types/game";
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const AUTH_TOKEN_STORAGE_KEY = "spades_auth_token";
@@ -122,6 +122,10 @@ export const getMyRooms = async (): Promise<
   }>("/api/rooms/mine", "GET");
 
   return result.rooms;
+};
+
+export const getGlobalAllTimeRecords = async (): Promise<AllTimeRecords> => {
+  return request<AllTimeRecords>("/api/records/global", "GET");
 };
 
 export const getRoom = async (roomId: string): Promise<RoomSnapshot> => {

@@ -7,6 +7,7 @@ import {
   createRoom,
   getAuthToken,
   getFriends,
+  getGlobalAllTimeRecords,
   getGoogleLoginUrl,
   getMyRooms,
   getSessionUser,
@@ -17,7 +18,7 @@ import {
   respondToFriendRequest,
   sendFriendRequest
 } from "../lib/api";
-import type { FriendsSnapshot, SessionUser } from "../types/game";
+import type { AllTimeRecords, FriendsSnapshot, SessionUser } from "../types/game";
 
 type MyRoom = {
   roomId: string;
@@ -33,6 +34,13 @@ const emptyFriendsSnapshot: FriendsSnapshot = {
   incomingRequests: [],
   outgoingRequests: [],
   suggestions: []
+};
+
+const emptyAllTimeRecords: AllTimeRecords = {
+  highestScore: null,
+  lowestScore: null,
+  highestHolders: [],
+  lowestHolders: []
 };
 
 function Avatar({ name, src }: { name: string; src: string | null }) {
@@ -59,6 +67,7 @@ export default function HomePage() {
   const [rooms, setRooms] = useState<MyRoom[]>([]);
   const [visibleRoomCount, setVisibleRoomCount] = useState(ROOM_PAGE_SIZE);
   const [friendsSnapshot, setFriendsSnapshot] = useState<FriendsSnapshot>(emptyFriendsSnapshot);
+  const [allTimeRecords, setAllTimeRecords] = useState<AllTimeRecords>(emptyAllTimeRecords);
 
   const loginUrl = useMemo(() => getGoogleLoginUrl(), []);
 
@@ -67,9 +76,14 @@ export default function HomePage() {
       try {
         const sessionUser = await getSessionUser();
         setUser(sessionUser);
-        const [myRooms, myFriends] = await Promise.all([getMyRooms(), getFriends()]);
+        const [myRooms, myFriends, globalRecords] = await Promise.all([
+          getMyRooms(),
+          getFriends(),
+          getGlobalAllTimeRecords().catch(() => emptyAllTimeRecords)
+        ]);
         setRooms(myRooms);
         setFriendsSnapshot(myFriends);
+        setAllTimeRecords(globalRecords);
       } catch {
         setUser(null);
       } finally {
@@ -204,10 +218,15 @@ export default function HomePage() {
     setRooms([]);
     setVisibleRoomCount(ROOM_PAGE_SIZE);
     setFriendsSnapshot(emptyFriendsSnapshot);
+    setAllTimeRecords(emptyAllTimeRecords);
   };
 
   const visibleRooms = rooms.slice(0, visibleRoomCount);
   const hasMoreRooms = rooms.length > visibleRooms.length;
+  const highestScore = allTimeRecords.highestScore;
+  const lowestScore = allTimeRecords.lowestScore;
+  const highestRecordHolders = allTimeRecords.highestHolders;
+  const lowestRecordHolders = allTimeRecords.lowestHolders;
 
   if (authLoading) {
     return (
@@ -324,6 +343,56 @@ export default function HomePage() {
             ) : null}
           </div>
         )}
+
+        <div className="record-holders-grid">
+          <div className="record-holder-card">
+            <div className="record-holder-header">
+              <h3>Global All-Time Highest</h3>
+              <span className="code">{highestScore ?? "-"}</span>
+            </div>
+            <div className="record-holder-list">
+              {highestRecordHolders.length === 0 ? (
+                <p className="muted">No completed sets yet.</p>
+              ) : (
+                highestRecordHolders.map((member) => (
+                  <div key={`home-highest-${member.userId}`} className="record-holder-row">
+                    <div className="player-cell">
+                      <Avatar name={member.displayName} src={member.avatarUrl} />
+                      <span className="table-name-truncate" title={member.displayName}>
+                        {member.displayName}
+                      </span>
+                    </div>
+                    <span className="record-holder-score">{member.score}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="record-holder-card">
+            <div className="record-holder-header">
+              <h3>Global All-Time Lowest</h3>
+              <span className="code">{lowestScore ?? "-"}</span>
+            </div>
+            <div className="record-holder-list">
+              {lowestRecordHolders.length === 0 ? (
+                <p className="muted">No completed sets yet.</p>
+              ) : (
+                lowestRecordHolders.map((member) => (
+                  <div key={`home-lowest-${member.userId}`} className="record-holder-row">
+                    <div className="player-cell">
+                      <Avatar name={member.displayName} src={member.avatarUrl} />
+                      <span className="table-name-truncate" title={member.displayName}>
+                        {member.displayName}
+                      </span>
+                    </div>
+                    <span className="record-holder-score">{member.score}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
       </section>
 
       <section className="card">
