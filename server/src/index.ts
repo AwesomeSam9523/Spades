@@ -278,44 +278,55 @@ const getRoomSnapshot = async (roomId: string) => {
 
   const leaderboard = [...members].sort((a, b) => b.totalPoints - a.totalPoints);
 
-  const memberProfileByUserId = new Map(
-    members.map((member) => [
-      member.userId,
-      {
-        displayName: member.displayName,
-        email: member.email,
-        avatarUrl: member.avatarUrl
+  const closedRounds = await prisma.round.findMany({
+    where: {state: "CLOSED"},
+    include: {
+      entries: {
+        include: {
+          member: {
+            include: {
+              user: true
+            }
+          }
+        }
       }
-    ])
-  );
-
-  const closedRoundNumbersBySet = new Map<number, Set<number>>();
-  for (const round of room.rounds) {
-    if (round.state !== "CLOSED") {
-      continue;
     }
+  });
 
+  const userProfileByUserId = new Map<string, {displayName: string; email: string; avatarUrl: string | null}>();
+  const closedRoundNumbersByRoomSet = new Map<string, Set<number>>();
+  for (const round of closedRounds) {
     const setNumber = getSetNumberForRound(round.roundNumber);
     const roundInSet = ((Math.max(round.roundNumber, 1) - 1) % ROUNDS_PER_SET) + 1;
-    const closedRoundsInSet = closedRoundNumbersBySet.get(setNumber) ?? new Set<number>();
+    const roomSetKey = `${round.roomId}:${setNumber}`;
+    const closedRoundsInSet = closedRoundNumbersByRoomSet.get(roomSetKey) ?? new Set<number>();
     closedRoundsInSet.add(roundInSet);
-    closedRoundNumbersBySet.set(setNumber, closedRoundsInSet);
+    closedRoundNumbersByRoomSet.set(roomSetKey, closedRoundsInSet);
+
+    for (const entry of round.entries) {
+      if (userProfileByUserId.has(entry.member.userId)) {
+        continue;
+      }
+
+      userProfileByUserId.set(entry.member.userId, {
+        displayName: entry.member.user.name ?? entry.member.user.email,
+        email: entry.member.user.email,
+        avatarUrl: entry.member.user.avatarUrl
+      });
+    }
   }
 
-  const completedSetNumbers = new Set(
-    [...closedRoundNumbersBySet.entries()]
+  const completedRoomSetKeys = new Set(
+    [...closedRoundNumbersByRoomSet.entries()]
       .filter(([, closedRoundsInSet]) => closedRoundsInSet.size === ROUNDS_PER_SET)
-      .map(([setNumber]) => setNumber)
+      .map(([roomSetKey]) => roomSetKey)
   );
 
-  const setScoreByPlayer = new Map<string, {userId: string; setNumber: number; score: number}>();
-  for (const round of room.rounds) {
-    if (round.state !== "CLOSED") {
-      continue;
-    }
-
+  const setScoreByPlayer = new Map<string, {userId: string; score: number}>();
+  for (const round of closedRounds) {
     const setNumber = getSetNumberForRound(round.roundNumber);
-    if (!completedSetNumbers.has(setNumber)) {
+    const roomSetKey = `${round.roomId}:${setNumber}`;
+    if (!completedRoomSetKeys.has(roomSetKey)) {
       continue;
     }
 
@@ -325,17 +336,15 @@ const getRoomSnapshot = async (roomId: string) => {
       }
 
       const roundPoints = entry.pointsAwarded ?? computeRoundPoints(entry.calledHands, entry.verifiedWinningHands ?? 0, entry.blindCall);
-      const userId = entry.member.userId;
-      const key = `${setNumber}:${userId}`;
-      const existingScore = setScoreByPlayer.get(key);
+      const recordKey = `${roomSetKey}:${entry.member.userId}`;
+      const existingScore = setScoreByPlayer.get(recordKey);
       if (existingScore) {
         existingScore.score += roundPoints;
         continue;
       }
 
-      setScoreByPlayer.set(key, {
-        userId,
-        setNumber,
+      setScoreByPlayer.set(recordKey, {
+        userId: entry.member.userId,
         score: roundPoints
       });
     }
@@ -363,7 +372,7 @@ const getRoomSnapshot = async (roomId: string) => {
         continue;
       }
 
-      const profile = memberProfileByUserId.get(record.userId);
+      const profile = userProfileByUserId.get(record.userId);
       if (!profile) {
         continue;
       }

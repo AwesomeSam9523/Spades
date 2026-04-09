@@ -639,7 +639,7 @@ export default function RoomPage() {
         <div className="record-holders-grid">
           <div className="record-holder-card">
             <div className="record-holder-header">
-              <h3>All-Time Highest</h3>
+              <h3>Global All-Time Highest</h3>
               <span className="code">{highestScore ?? "-"}</span>
             </div>
             <div className="record-holder-list">
@@ -663,7 +663,7 @@ export default function RoomPage() {
 
           <div className="record-holder-card">
             <div className="record-holder-header">
-              <h3>All-Time Lowest</h3>
+              <h3>Global All-Time Lowest</h3>
               <span className="code">{lowestScore ?? "-"}</span>
             </div>
             <div className="record-holder-list">
